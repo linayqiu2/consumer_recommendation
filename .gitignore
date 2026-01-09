@@ -33,3 +33,4 @@ npm-debug.log*
 # Test coverage
 coverage/
 .coverage
+articles.db
