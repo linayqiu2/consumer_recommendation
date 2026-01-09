@@ -13,16 +13,21 @@ from contextlib import contextmanager
 # Database file path - use environment variable for production, default for local
 DB_PATH = os.environ.get("DATABASE_PATH", "articles.db")
 
-# On first deploy, copy bundled database to volume if it doesn't exist
+# On first deploy, copy bundled database to volume if it's empty or doesn't exist
 def _init_database_file():
     """Copy bundled articles.db to volume mount if needed."""
-    if DB_PATH != "articles.db" and not os.path.exists(DB_PATH):
+    if DB_PATH != "articles.db":
         bundled_db = os.path.join(os.path.dirname(__file__), "articles.db")
         if os.path.exists(bundled_db):
-            import shutil
-            os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-            shutil.copy2(bundled_db, DB_PATH)
-            print(f"Copied bundled database to {DB_PATH}")
+            # Check if volume DB is missing or smaller than bundled (likely empty)
+            bundled_size = os.path.getsize(bundled_db)
+            volume_size = os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0
+
+            if volume_size < bundled_size:
+                import shutil
+                os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+                shutil.copy2(bundled_db, DB_PATH)
+                print(f"Copied bundled database ({bundled_size} bytes) to {DB_PATH}")
 
 _init_database_file()
 
