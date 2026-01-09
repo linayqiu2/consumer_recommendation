@@ -5,12 +5,13 @@ Uses SQLite for local storage.
 
 import sqlite3
 import json
+import os
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from contextlib import contextmanager
 
-# Database file path
-DB_PATH = "articles.db"
+# Database file path - use environment variable for production, default for local
+DB_PATH = os.environ.get("DATABASE_PATH", "articles.db")
 
 # OpenAI cost per 1K tokens (as of 2024)
 OPENAI_COSTS = {
