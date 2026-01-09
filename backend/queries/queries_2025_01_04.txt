@@ -1,0 +1,8 @@
+# Format: topic | query
+# EV queries
+EV | Tesla Model Y Highland real-world range test
+EV | Compare Tesla Model Y, Rivian R1S, Lucid Gravity, Mercedes EQE SUV and Mercedes EQS SUV
+
+# Camera queries
+Cameras | Recommend Hasselblad Cameras
+Cameras | Compare Leica Cameras by series M, Q and SL. Recommend based on the key differences and possible user needs
