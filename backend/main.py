@@ -3833,6 +3833,21 @@ def _cache_trending_content(cache_key: str, data: dict) -> None:
 def health_check():
     return {"status": "healthy"}
 
+@app.get("/debug/db")
+def debug_db():
+    """Debug endpoint to check database status."""
+    import os
+    bundled_db = os.path.join(os.path.dirname(__file__), "articles.db")
+    return {
+        "DB_PATH": db.DB_PATH,
+        "DB_PATH_exists": os.path.exists(db.DB_PATH),
+        "bundled_db_path": bundled_db,
+        "bundled_db_exists": os.path.exists(bundled_db),
+        "cwd": os.getcwd(),
+        "cwd_contents": os.listdir(os.getcwd()),
+        "DATABASE_PATH_env": os.environ.get("DATABASE_PATH", "not set"),
+    }
+
 
 # ================
 # ARTICLES API ENDPOINTS (for landing page)
