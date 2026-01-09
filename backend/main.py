@@ -3837,14 +3837,39 @@ def health_check():
 def debug_db():
     """Debug endpoint to check database status."""
     import os
+    import sqlite3
     bundled_db = os.path.join(os.path.dirname(__file__), "articles.db")
+
+    # Check file sizes
+    db_size = os.path.getsize(db.DB_PATH) if os.path.exists(db.DB_PATH) else 0
+    bundled_size = os.path.getsize(bundled_db) if os.path.exists(bundled_db) else 0
+
+    # Count articles in both databases
+    article_count = 0
+    bundled_count = 0
+    try:
+        conn = sqlite3.connect(db.DB_PATH)
+        article_count = conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
+        conn.close()
+    except Exception as e:
+        article_count = f"error: {e}"
+
+    try:
+        conn = sqlite3.connect(bundled_db)
+        bundled_count = conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
+        conn.close()
+    except Exception as e:
+        bundled_count = f"error: {e}"
+
     return {
         "DB_PATH": db.DB_PATH,
         "DB_PATH_exists": os.path.exists(db.DB_PATH),
+        "DB_PATH_size": db_size,
+        "DB_PATH_article_count": article_count,
         "bundled_db_path": bundled_db,
         "bundled_db_exists": os.path.exists(bundled_db),
-        "cwd": os.getcwd(),
-        "cwd_contents": os.listdir(os.getcwd()),
+        "bundled_db_size": bundled_size,
+        "bundled_db_article_count": bundled_count,
         "DATABASE_PATH_env": os.environ.get("DATABASE_PATH", "not set"),
     }
 
