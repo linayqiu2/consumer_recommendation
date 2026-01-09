@@ -3833,6 +3833,15 @@ def _cache_trending_content(cache_key: str, data: dict) -> None:
 def health_check():
     return {"status": "healthy"}
 
+@app.get("/debug/classify")
+def debug_classify(query: str):
+    """Debug endpoint to test query classification."""
+    try:
+        result = classify_query(query)
+        return {"query": query, "classification": result}
+    except Exception as e:
+        return {"query": query, "error": str(e)}
+
 @app.get("/debug/db")
 def debug_db():
     """Debug endpoint to check database status."""
