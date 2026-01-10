@@ -286,7 +286,7 @@ export default function TrendsSidebar({ onViewArticle, apiUrl }: TrendsSidebarPr
 
                     {/* Content */}
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-slate-800 font-medium text-sm line-clamp-2 mb-1 group-hover:text-sky-600 transition-colors leading-snug">
+                      <h3 className="text-slate-800 font-medium text-sm line-clamp-2 group-hover:line-clamp-none mb-1 group-hover:text-sky-600 transition-colors leading-snug">
                         {article.title}
                       </h3>
                       <div className="flex items-center gap-2 text-xs text-slate-500">
