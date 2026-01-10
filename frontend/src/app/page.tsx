@@ -2215,7 +2215,7 @@ export default function Home() {
       </div>
 
       {/* Trends Sidebar - toggleable in conversation mode */}
-      <div className={`${showTrendsSidebar ? 'w-[380px]' : 'w-0'} transition-all duration-300 bg-gray-100 border-l border-gray-200 overflow-hidden`}>
+      <div className={`${showTrendsSidebar ? 'w-[380px]' : 'w-0'} transition-all duration-300 bg-slate-100 overflow-hidden`}>
         {showTrendsSidebar && (
           <TrendsSidebar onViewArticle={handleViewArticle} apiUrl={API_URL} />
         )}

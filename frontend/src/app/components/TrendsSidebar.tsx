@@ -173,23 +173,23 @@ export default function TrendsSidebar({ onViewArticle, apiUrl }: TrendsSidebarPr
     : typeFilteredArticles.filter(a => selectedTopics.has(a.topic))
 
   return (
-    <div className="w-full h-full flex flex-col bg-gray-50/50 py-10 px-5">
+    <div className="w-full h-full flex flex-col bg-gradient-to-b from-slate-50 to-slate-100/50 py-10 px-5 border-l-2 border-sky-400/50">
       {/* Section Header */}
       <div className="flex items-center gap-2 mb-1.5">
-        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-        <h2 className="text-sm font-bold text-gray-800 tracking-tight">Cross-Reviewer Trends</h2>
+        <span className="w-2 h-2 rounded-full bg-sky-500 animate-pulse"></span>
+        <h2 className="text-sm font-bold text-slate-800 tracking-tight">Cross-Reviewer Trends</h2>
       </div>
-      <p className="text-gray-500 text-xs mb-5">What multiple reviewers are saying right now</p>
+      <p className="text-slate-500 text-xs mb-5">What multiple reviewers are saying right now</p>
 
       {/* Topic Filter */}
       {uniqueCategories.length > 0 && (
         <div className="mb-3">
-          <div className="flex items-center gap-2 mb-2 text-xs text-gray-500">
+          <div className="flex items-center gap-2 mb-2 text-xs text-slate-500">
             <span>Topic:</span>
             {selectedTopics.size > 0 && (
               <button
                 onClick={() => setSelectedTopics(new Set())}
-                className="text-cyan-600 hover:text-cyan-700 transition-colors"
+                className="text-sky-600 hover:text-sky-700 transition-colors"
               >
                 Clear
               </button>
@@ -207,7 +207,7 @@ export default function TrendsSidebar({ onViewArticle, apiUrl }: TrendsSidebarPr
                   className={`px-2 py-0.5 rounded text-xs border transition-all cursor-pointer
                     ${isSelected || isAllSelected
                       ? `${style.bg} ${style.text} ${style.border}`
-                      : 'bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200'
+                      : 'bg-slate-100 text-slate-500 border-slate-300 hover:bg-slate-200'
                     }`}
                 >
                   {cat}
@@ -220,7 +220,7 @@ export default function TrendsSidebar({ onViewArticle, apiUrl }: TrendsSidebarPr
 
       {/* Type Filter */}
       <div className="mb-4">
-        <div className="flex items-center gap-2 mb-2 text-xs text-gray-500">
+        <div className="flex items-center gap-2 mb-2 text-xs text-slate-500">
           <span>Type:</span>
         </div>
         <div className="flex gap-1.5">
@@ -230,8 +230,8 @@ export default function TrendsSidebar({ onViewArticle, apiUrl }: TrendsSidebarPr
               onClick={() => setSelectedType(type)}
               className={`px-2 py-0.5 rounded text-xs border transition-all cursor-pointer
                 ${selectedType === type
-                  ? 'bg-cyan-100 text-cyan-700 border-cyan-300'
-                  : 'bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200'
+                  ? 'bg-sky-100 text-sky-700 border-sky-300'
+                  : 'bg-slate-100 text-slate-500 border-slate-300 hover:bg-slate-200'
                 }`}
             >
               {type === 'both' ? 'Both' : type === 'trending' ? 'Trending' : 'Evergreen'}
@@ -245,12 +245,12 @@ export default function TrendsSidebar({ onViewArticle, apiUrl }: TrendsSidebarPr
         {isLoading ? (
           <div className="flex flex-col gap-4">
             {[...Array(5)].map((_, i) => (
-              <div key={i} className="bg-white rounded-lg p-3 animate-pulse border border-gray-200">
+              <div key={i} className="bg-white rounded-lg p-3 animate-pulse border border-slate-200">
                 <div className="flex gap-3">
-                  <div className="w-20 h-14 bg-gray-200 rounded-lg"></div>
+                  <div className="w-20 h-14 bg-slate-200 rounded-lg"></div>
                   <div className="flex-1">
-                    <div className="h-3 bg-gray-200 rounded w-3/4 mb-2"></div>
-                    <div className="h-2.5 bg-gray-100 rounded w-1/2"></div>
+                    <div className="h-3 bg-slate-200 rounded w-3/4 mb-2"></div>
+                    <div className="h-2.5 bg-slate-100 rounded w-1/2"></div>
                   </div>
                 </div>
               </div>
@@ -264,11 +264,11 @@ export default function TrendsSidebar({ onViewArticle, apiUrl }: TrendsSidebarPr
                 <div
                   key={article.id}
                   onClick={() => onViewArticle(article.id)}
-                  className="bg-white rounded-xl p-3 hover:bg-gray-50 transition-all cursor-pointer group border border-gray-200 hover:border-gray-300 hover:shadow-sm"
+                  className="bg-white rounded-xl p-3 hover:bg-slate-50 transition-all cursor-pointer group border border-slate-200 hover:border-slate-300 shadow-sm hover:shadow-md"
                 >
                   <div className="flex gap-3">
                     {/* Thumbnail */}
-                    <div className="w-20 h-14 rounded-lg overflow-hidden bg-gray-100 shrink-0">
+                    <div className="w-20 h-14 rounded-lg overflow-hidden bg-slate-100 shrink-0">
                       {article.thumbnail ? (
                         <img
                           src={article.thumbnail}
@@ -277,7 +277,7 @@ export default function TrendsSidebar({ onViewArticle, apiUrl }: TrendsSidebarPr
                         />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center">
-                          <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <svg className="w-6 h-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                           </svg>
                         </div>
@@ -286,10 +286,10 @@ export default function TrendsSidebar({ onViewArticle, apiUrl }: TrendsSidebarPr
 
                     {/* Content */}
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-gray-800 font-medium text-sm line-clamp-2 mb-1 group-hover:text-cyan-600 transition-colors leading-snug">
+                      <h3 className="text-slate-800 font-medium text-sm line-clamp-2 mb-1 group-hover:text-sky-600 transition-colors leading-snug">
                         {article.title}
                       </h3>
-                      <div className="flex items-center gap-2 text-xs text-gray-500">
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
                         <span className="flex items-center gap-1">
                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -327,13 +327,13 @@ export default function TrendsSidebar({ onViewArticle, apiUrl }: TrendsSidebarPr
             })}
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center py-12 text-gray-500">
-            <div className="w-14 h-14 rounded-full bg-gray-200 flex items-center justify-center mb-3">
-              <svg className="w-7 h-7 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+            <div className="w-14 h-14 rounded-full bg-slate-200 flex items-center justify-center mb-3">
+              <svg className="w-7 h-7 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
               </svg>
             </div>
-            <h3 className="text-gray-900 font-medium mb-1 text-sm">No trends yet</h3>
+            <h3 className="text-slate-900 font-medium mb-1 text-sm">No trends yet</h3>
             <p className="text-xs">Cross-reviewer analysis will appear here</p>
           </div>
         )}
@@ -341,7 +341,7 @@ export default function TrendsSidebar({ onViewArticle, apiUrl }: TrendsSidebarPr
 
       {/* Footer */}
       {filteredArticles.length > 0 && (
-        <div className="mt-4 pt-4 border-t border-gray-200 text-xs text-gray-500">
+        <div className="mt-4 pt-4 border-t border-slate-200 text-xs text-slate-500">
           <span>
             {filteredArticles.length} trend{filteredArticles.length !== 1 ? 's' : ''}
             {selectedTopics.size > 0 && ` (filtered from ${articles.length})`}
