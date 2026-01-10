@@ -4,13 +4,15 @@
 
 :root {
   --background: #ffffff;
-  --sidebar: #f7f7f8;
+  --sidebar: #f8fafc;
   --user-msg: #ffffff;
-  --assistant-msg: #f7f7f8;
-  --border: #e5e5e5;
-  --text-primary: #1a1a1a;
-  --text-secondary: #6b7280;
-  --accent: #10a37f;
+  --assistant-msg: #f8fafc;
+  --border: #e2e8f0;
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  --accent: #0ea5e9;
+  --accent-hover: #0284c7;
+  --accent-light: rgba(14, 165, 233, 0.08);
 }
 
 * {
