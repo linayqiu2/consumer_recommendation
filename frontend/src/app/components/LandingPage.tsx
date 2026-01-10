@@ -100,26 +100,65 @@ export default function LandingPage({ onStartConversation }: LandingPageProps) {
           <span className="text-slate-800 font-medium">miss</span>.
         </p>
 
-        {/* Trust Chips - simplified, more professional */}
-        <div className="flex flex-wrap items-center justify-center gap-6 mb-10 max-w-2xl mx-auto">
-          <span className="flex items-center gap-2 text-sm text-slate-600">
-            <svg className="w-4 h-4 text-sky-500" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-            </svg>
-            Timestamped quotes
-          </span>
-          <span className="flex items-center gap-2 text-sm text-slate-600">
-            <svg className="w-4 h-4 text-sky-500" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-            </svg>
-            Cross-reviewer analysis
-          </span>
-          <span className="flex items-center gap-2 text-sm text-slate-600">
-            <svg className="w-4 h-4 text-sky-500" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-            </svg>
-            Bias detection
-          </span>
+        {/* Trust Chips with hover expand */}
+        <div className="group mb-10 max-w-2xl mx-auto">
+          <div className="flex flex-wrap items-center justify-center gap-5 text-sm text-slate-600 font-medium">
+            <span className="flex items-center gap-1.5">
+              <svg className="w-4 h-4 text-emerald-500" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              Timestamped quotes
+            </span>
+            <span className="flex items-center gap-1.5">
+              <svg className="w-4 h-4 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              Disagreement detection
+            </span>
+            <span className="flex items-center gap-1.5">
+              <svg className="w-4 h-4 text-violet-500" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              Bias-aware
+            </span>
+            <span className="text-slate-400 text-xs opacity-60 group-hover:opacity-0 transition-opacity">(hover for details)</span>
+          </div>
+
+          {/* Expandable feature details - CSS-only hover */}
+          <div className="grid grid-cols-2 gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200 mt-4 max-h-0 opacity-0 overflow-hidden group-hover:max-h-32 group-hover:opacity-100 transition-all duration-300">
+            <div className="flex items-center gap-2 text-sm">
+              <div className="w-8 h-8 rounded-lg bg-sky-500/15 flex items-center justify-center shrink-0">
+                <svg className="w-4 h-4 text-sky-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <span className="text-slate-700">Video analysis</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center shrink-0">
+                <svg className="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <span className="text-slate-700">Verified sources</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <div className="w-8 h-8 rounded-lg bg-violet-500/15 flex items-center justify-center shrink-0">
+                <svg className="w-4 h-4 text-violet-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+              </div>
+              <span className="text-slate-700">Cross-review</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <div className="w-8 h-8 rounded-lg bg-amber-500/15 flex items-center justify-center shrink-0">
+                <svg className="w-4 h-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+              <span className="text-slate-700">Real-time</span>
+            </div>
+          </div>
         </div>
 
         {/* Search Input - Primary CTA */}
