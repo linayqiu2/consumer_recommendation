@@ -46,8 +46,8 @@ export default function LandingPage({ onStartConversation }: LandingPageProps) {
 
   return (
     <div className="relative flex-1 flex flex-col justify-center py-8 px-8 md:py-12 md:px-12 overflow-hidden bg-white -mt-24 md:-mt-28">
-      {/* Auth buttons - top right */}
-      <div className="absolute top-4 right-4 flex items-center gap-3 z-20">
+      {/* Auth buttons - top right, positioned relative to viewport */}
+      <div className="fixed top-4 right-4 flex items-center gap-3 z-50 md:absolute md:top-28 md:right-4">
         {isLoading ? (
           <div className="w-20 h-8 bg-gray-200 rounded animate-pulse" />
         ) : user ? (
