@@ -30,24 +30,23 @@ const GITHUB_CLIENT_ID = process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID || ''
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  // Start with false for SSR, then check token on client
+  const [isLoading, setIsLoading] = useState(false)
+  const [hasCheckedAuth, setHasCheckedAuth] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Check for existing token on mount
+  // Check for existing token on mount (client-side only)
   useEffect(() => {
-    // Only access localStorage on client side
-    if (typeof window === 'undefined') {
-      setIsLoading(false)
-      return
-    }
+    if (hasCheckedAuth) return
 
     const token = localStorage.getItem(TOKEN_KEY)
     if (token) {
-      fetchUser(token)
+      setIsLoading(true)
+      fetchUser(token).finally(() => setHasCheckedAuth(true))
     } else {
-      setIsLoading(false)
+      setHasCheckedAuth(true)
     }
-  }, [])
+  }, [hasCheckedAuth])
 
   const fetchUser = async (token: string) => {
     try {
