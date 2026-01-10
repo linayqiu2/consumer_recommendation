@@ -45,7 +45,7 @@ export default function LandingPage({ onStartConversation }: LandingPageProps) {
   }
 
   return (
-    <div className="relative flex-1 flex flex-col justify-center py-8 px-8 md:py-12 md:px-12 overflow-hidden bg-gradient-to-b from-white to-slate-50/50 -mt-24 md:-mt-28">
+    <div className="relative flex-1 flex flex-col justify-center py-8 px-8 md:py-12 md:px-12 overflow-hidden bg-gradient-to-b from-slate-50 to-slate-100/80 -mt-24 md:-mt-28">
       {/* Auth buttons - top right of main panel */}
       <div className="absolute top-28 right-4 flex items-center gap-3 z-20 md:top-32">
         {isLoading ? (
@@ -82,7 +82,7 @@ export default function LandingPage({ onStartConversation }: LandingPageProps) {
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
-          background: 'radial-gradient(ellipse 80% 50% at 50% -20%, rgba(120,180,255,0.08), transparent)',
+          background: 'radial-gradient(ellipse 80% 50% at 50% 0%, rgba(14,165,233,0.08), transparent)',
         }}
       />
 
