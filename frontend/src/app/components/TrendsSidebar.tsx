@@ -173,7 +173,7 @@ export default function TrendsSidebar({ onViewArticle, apiUrl }: TrendsSidebarPr
     : typeFilteredArticles.filter(a => selectedTopics.has(a.topic))
 
   return (
-    <div className="w-full h-full flex flex-col bg-gradient-to-b from-slate-50 to-slate-100/50 py-10 px-5 border-l-2 border-sky-400/50">
+    <div className="w-full h-full flex flex-col bg-gradient-to-b from-slate-50 to-slate-100/50 py-10 px-5">
       {/* Section Header */}
       <div className="flex items-center gap-2 mb-1.5">
         <span className="w-2 h-2 rounded-full bg-sky-500 animate-pulse"></span>
