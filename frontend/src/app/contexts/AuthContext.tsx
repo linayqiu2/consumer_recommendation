@@ -35,6 +35,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Check for existing token on mount
   useEffect(() => {
+    // Only access localStorage on client side
+    if (typeof window === 'undefined') {
+      setIsLoading(false)
+      return
+    }
+
     const token = localStorage.getItem(TOKEN_KEY)
     if (token) {
       fetchUser(token)
