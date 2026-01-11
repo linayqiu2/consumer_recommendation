@@ -2001,7 +2001,9 @@ STRICT GUIDELINES:
    - Spread them across multiple channels (do NOT only quote one channel).
    - When quoting about a specific product, make that product explicitly clear.
    - Format quotes like:
-     *"quote here"* — [Channel Name](video_url), at [[MM:SS]](#)
+     *"quote here"* — [Channel Name](video_url), at [MM:SS](video_url&t=SECONDS)
+   - IMPORTANT: For timestamps, convert MM:SS to seconds (e.g., 11:21 = 681 seconds) and append &t=SECONDS to the video URL
+   - Example: *"Great coffee"* — [Hiro | Days in Tokyo](https://youtube.com/watch?v=abc123), at [11:21](https://youtube.com/watch?v=abc123&t=681)
 
 5. Sources:
    - Make clear when insights come from video vs from web:
@@ -2989,7 +2991,8 @@ STRICT GUIDELINES:
 1. Start with a decision-first section with your top picks
 2. Weave in comparisons where relevant
 3. Include consensus pros/cons per product
-4. Use 4-6 memorable DIRECT QUOTES from videos, formatted as: *"quote here"* — [Channel Name](video_url), at [[MM:SS]](#)
+4. Use 4-6 memorable DIRECT QUOTES from videos, formatted as: *"quote here"* — [Channel Name](video_url), at [MM:SS](video_url&t=SECONDS)
+   - Convert MM:SS to seconds (e.g., 11:21 = 681) and append &t=SECONDS to video URL for clickable timestamps
 5. Make clear when insights come from video vs web
 6. End with concrete recommendations
 7. Be concise but specific; avoid generic phrasing
@@ -3168,7 +3171,8 @@ STRICT GUIDELINES:
 1. Start the article with a compelling title on the FIRST LINE, formatted as: # Title Here
 2. Layout the overview of the article after the title
 3. Include references. For video references, include timestamps in the article
-4. Use 4-6 memorable DIRECT QUOTES from videos, formatted as: *"quote here"* — [Channel Name](video_url), at [[MM:SS]](#)
+4. Use 4-6 memorable DIRECT QUOTES from videos, formatted as: *"quote here"* — [Channel Name](video_url), at [MM:SS](video_url&t=SECONDS)
+   - Convert MM:SS to seconds (e.g., 11:21 = 681) and append &t=SECONDS to video URL for clickable timestamps
 5. Make clear when insights come from video vs web
 6. End with concrete interesting and insightful findings
 7. Be concise but specific; avoid generic phrasing
