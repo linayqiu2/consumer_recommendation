@@ -2003,6 +2003,7 @@ STRICT GUIDELINES:
    - Format quotes like:
      *"quote here"* — [Channel Name](video_url) at [MM:SS]
    - IMPORTANT: The video_url MUST be the actual URL from that specific video's data, NOT a URL from another video
+   - IMPORTANT: Timestamps MUST be in [MM:SS] format (e.g., [04:07], [11:21]), NOT raw seconds
    - Example: *"Great coffee"* — [Hiro | Days in Tokyo](https://youtube.com/watch?v=abc123) at [11:21]
 
 5. Sources:
@@ -2993,6 +2994,7 @@ STRICT GUIDELINES:
 3. Include consensus pros/cons per product
 4. Use 4-6 memorable DIRECT QUOTES from videos, formatted as: *"quote here"* — [Channel Name](video_url) at [MM:SS]
    - CRITICAL: Use the correct video_url for each quote - match the channel name to its video URL from the data
+   - CRITICAL: Timestamps MUST be in [MM:SS] format (e.g., [04:07], [11:21]), NOT raw seconds like "16" or "247"
 5. Make clear when insights come from video vs web
 6. End with concrete recommendations
 7. Be concise but specific; avoid generic phrasing
@@ -3173,6 +3175,7 @@ STRICT GUIDELINES:
 3. Include references. For video references, include timestamps in the article
 4. Use 4-6 memorable DIRECT QUOTES from videos, formatted as: *"quote here"* — [Channel Name](video_url) at [MM:SS]
    - CRITICAL: Use the correct video_url for each quote - match the channel name to its video URL from the data
+   - CRITICAL: Timestamps MUST be in [MM:SS] format (e.g., [04:07], [11:21]), NOT raw seconds like "16" or "247"
 5. Make clear when insights come from video vs web
 6. End with concrete interesting and insightful findings
 7. Be concise but specific; avoid generic phrasing
