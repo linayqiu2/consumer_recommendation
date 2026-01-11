@@ -11,6 +11,7 @@ import traceback
 import json
 import time
 import re
+import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -53,6 +54,66 @@ TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
 # Initialize YouTube API client
 youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
+
+# ================
+# SYNTHESIS CACHE
+# ================
+# Cache synthesis results to avoid redundant LLM calls for similar video sets
+# Key: hash of sorted product names from video insights
+# Value: (synthesis_result, timestamp)
+_synthesis_cache: dict[str, tuple[dict, float]] = {}
+_synthesis_cache_lock = threading.Lock()
+SYNTHESIS_CACHE_TTL_SECONDS = 3600  # 1 hour TTL
+
+
+def _get_synthesis_cache_key(video_insights: List[dict]) -> str:
+    """Generate a cache key from video insights based on product names and video IDs."""
+    # Extract unique identifiers: video URLs + product names
+    identifiers = []
+    for v in video_insights:
+        # Add video URL as identifier
+        if v.get("video_url"):
+            identifiers.append(v["video_url"])
+        # Add product names
+        for p in v.get("products", []):
+            if p.get("name"):
+                identifiers.append(p["name"].lower().strip())
+
+    # Sort for consistency and create hash
+    identifiers.sort()
+    key_string = "|".join(identifiers)
+    return hashlib.md5(key_string.encode()).hexdigest()
+
+
+def _get_cached_synthesis(cache_key: str) -> Optional[dict]:
+    """Get cached synthesis result if valid."""
+    with _synthesis_cache_lock:
+        if cache_key in _synthesis_cache:
+            result, timestamp = _synthesis_cache[cache_key]
+            if time.time() - timestamp < SYNTHESIS_CACHE_TTL_SECONDS:
+                print(f"[Cache HIT] Synthesis cache hit for key {cache_key[:8]}...")
+                return result
+            else:
+                # Expired, remove it
+                del _synthesis_cache[cache_key]
+                print(f"[Cache EXPIRED] Synthesis cache expired for key {cache_key[:8]}...")
+    return None
+
+
+def _set_cached_synthesis(cache_key: str, result: dict) -> None:
+    """Store synthesis result in cache."""
+    with _synthesis_cache_lock:
+        _synthesis_cache[cache_key] = (result, time.time())
+        print(f"[Cache SET] Stored synthesis for key {cache_key[:8]}...")
+
+        # Clean up old entries if cache gets too large (keep max 100 entries)
+        if len(_synthesis_cache) > 100:
+            # Remove oldest entries
+            sorted_keys = sorted(_synthesis_cache.keys(),
+                                key=lambda k: _synthesis_cache[k][1])
+            for old_key in sorted_keys[:20]:  # Remove oldest 20
+                del _synthesis_cache[old_key]
+
 
 # Country to language mapping (ISO 3166-1 alpha-2 to ISO 639-1)
 COUNTRY_TO_LANGUAGE = {
@@ -1596,7 +1657,8 @@ Rules:
 def extract_insights_for_videos(
     videos_with_content: List[dict],
     max_workers: int = 8,
-    on_video_complete: Optional[Callable[[int, int, str], None]] = None
+    on_video_complete: Optional[Callable[[int, int, str], None]] = None,
+    on_insight_ready: Optional[Callable[[dict], None]] = None
 ) -> List[dict]:
     """
     Run structured extraction for all videos with transcripts IN PARALLEL.
@@ -1607,6 +1669,8 @@ def extract_insights_for_videos(
         max_workers: Max parallel threads
         on_video_complete: Optional callback(completed_count, total_count, video_title)
                           called each time a video finishes processing
+        on_insight_ready: Optional callback(insight_dict) called immediately when
+                         each insight is extracted (for early synthesis)
     """
     if not videos_with_content:
         return []
@@ -1641,6 +1705,9 @@ def extract_insights_for_videos(
                 if result:
                     insights.append(result)
                     print(f"  ✓ Extracted insights for: {video_title}...")
+                    # Notify early synthesis callback if provided
+                    if on_insight_ready:
+                        on_insight_ready(result)
                 else:
                     print(f"  ○ No insights from: {video_title}...")
 
@@ -1666,9 +1733,17 @@ def synthesize_video_insights(video_insights: List[dict]) -> Optional[dict]:
     - Mixed set of videos, some single-product, some multi-product / comparison
 
     The synthesis is per-product, plus some comparison-level insights.
+
+    Uses caching to avoid redundant LLM calls for the same video sets.
     """
     if not video_insights:
         return None
+
+    # Check cache first
+    cache_key = _get_synthesis_cache_key(video_insights)
+    cached_result = _get_cached_synthesis(cache_key)
+    if cached_result is not None:
+        return cached_result
 
     system_prompt = (
         "You are a multi-video synthesis engine for product reviews. "
@@ -1745,7 +1820,10 @@ Return ONLY valid JSON (no markdown) with this exact structure:
 
     raw = call_gpt5("gpt-5-mini", system_prompt, user_prompt)
     try:
-        return json.loads(raw.strip())
+        result = json.loads(raw.strip())
+        # Cache the successful result
+        _set_cached_synthesis(cache_key, result)
+        return result
     except Exception as e:
         print(f"Failed to parse synthesis JSON: {e}\nRaw: {raw[:500]}...")
         return None
@@ -2736,8 +2814,9 @@ async def chat_stream(request: ChatRequest):
                     yield send_progress("insights", "Analyzing video content", f"→ 0/{total_vids} videos analyzed")
                     step_start = time.time()
 
-                    # Use a queue to get progress updates from the parallel extraction
+                    # Use queues to get progress updates and completed insights from parallel extraction
                     progress_queue: queue.Queue = queue.Queue()
+                    insights_queue: queue.Queue = queue.Queue()  # For early synthesis
 
                     def on_video_done(completed: int, total: int, title: str):
                         progress_queue.put((completed, total, title))
@@ -2748,14 +2827,59 @@ async def chat_stream(request: ChatRequest):
                     def run_extraction():
                         extraction_result[0] = extract_insights_for_videos(
                             videos_for_insights,
-                            on_video_complete=on_video_done
+                            on_video_complete=on_video_done,
+                            on_insight_ready=lambda insight: insights_queue.put(insight) if insight else None
                         )
 
                     extraction_thread = threading.Thread(target=run_extraction)
                     extraction_thread.start()
 
+                    # OPTIMIZATION: Start synthesis early once we have 2+ insights
+                    # This runs synthesis in parallel with remaining video extractions
+                    early_insights: List[dict] = []
+                    synthesis_result = [None]
+                    synthesis_done = threading.Event()
+                    synthesis_thread = None
+                    synthesis_started = False
+                    MIN_INSIGHTS_FOR_EARLY_SYNTHESIS = 2
+
+                    synthesis_substeps = [
+                        "Identifying common themes across reviews",
+                        "Comparing product mentions and ratings",
+                        "Finding consensus pros and cons",
+                        "Detecting controversial opinions",
+                        "Building product-by-product summary",
+                    ]
+
+                    def run_synthesis_with_insights(insights_to_synthesize: List[dict]):
+                        synthesis_result[0] = synthesize_video_insights(insights_to_synthesize)
+                        synthesis_done.set()
+
                     # Poll the queue and yield progress updates
-                    while extraction_thread.is_alive() or not progress_queue.empty():
+                    while extraction_thread.is_alive() or not progress_queue.empty() or not insights_queue.empty():
+                        # Collect any ready insights
+                        try:
+                            while True:
+                                insight = insights_queue.get_nowait()
+                                if insight:
+                                    early_insights.append(insight)
+
+                                    # Start synthesis early if we have enough insights and haven't started yet
+                                    if (not synthesis_started and
+                                        len(early_insights) >= MIN_INSIGHTS_FOR_EARLY_SYNTHESIS and
+                                        total_vids >= MIN_INSIGHTS_FOR_EARLY_SYNTHESIS):
+                                        synthesis_started = True
+                                        # Start synthesis with current insights (will use cache if available)
+                                        synthesis_thread = threading.Thread(
+                                            target=run_synthesis_with_insights,
+                                            args=(list(early_insights),)  # Copy current insights
+                                        )
+                                        synthesis_thread.start()
+                                        print(f"[Early Synthesis] Started with {len(early_insights)}/{total_vids} videos")
+                        except queue.Empty:
+                            pass
+
+                        # Check for progress updates
                         try:
                             completed, total, title = progress_queue.get(timeout=0.1)
                             # Truncate title for cleaner display
@@ -2769,45 +2893,70 @@ async def chat_stream(request: ChatRequest):
 
                     timing.insights_extraction_seconds = time.time() - step_start
                     yield send_progress("insights", "Analyzing video content", f"→ {len(video_insights)} videos analyzed")
+
+                    # If we started early synthesis but got more videos after, we may need to re-synthesize
+                    # But only if we got significantly more insights (50%+ more)
+                    should_resynthesize = (
+                        synthesis_started and
+                        len(video_insights) > len(early_insights) * 1.5 and
+                        len(video_insights) > MIN_INSIGHTS_FOR_EARLY_SYNTHESIS
+                    )
+
+                    if should_resynthesize:
+                        print(f"[Re-synthesis] More videos completed ({len(video_insights)} vs {len(early_insights)}), re-synthesizing")
+                        # Wait for early synthesis to finish first
+                        if synthesis_thread and synthesis_thread.is_alive():
+                            synthesis_thread.join()
+                        # Start new synthesis with all insights
+                        synthesis_done.clear()
+                        synthesis_thread = threading.Thread(
+                            target=run_synthesis_with_insights,
+                            args=(video_insights,)
+                        )
+                        synthesis_thread.start()
                 else:
                     video_insights = []
+                    synthesis_result = [None]
+                    synthesis_done = threading.Event()
+                    synthesis_thread = None
+                    synthesis_started = False
+                    synthesis_substeps = []
 
                 # Synthesize insights across videos with animated sub-steps
                 if video_insights:
-                    step_start = time.time()
+                    synthesis_step_start = time.time()
 
-                    # Define synthesis sub-steps to show while LLM is thinking
-                    synthesis_substeps = [
-                        "Identifying common themes across reviews",
-                        "Comparing product mentions and ratings",
-                        "Finding consensus pros and cons",
-                        "Detecting controversial opinions",
-                        "Building product-by-product summary",
-                    ]
+                    # If synthesis wasn't started early (single video or very few), start it now
+                    if not synthesis_started:
+                        synthesis_substeps = [
+                            "Identifying common themes across reviews",
+                            "Comparing product mentions and ratings",
+                            "Finding consensus pros and cons",
+                            "Detecting controversial opinions",
+                            "Building product-by-product summary",
+                        ]
 
-                    # Run synthesis in background thread
-                    synthesis_result = [None]
-                    synthesis_done = threading.Event()
+                        def run_synthesis():
+                            synthesis_result[0] = synthesize_video_insights(video_insights)
+                            synthesis_done.set()
 
-                    def run_synthesis():
-                        synthesis_result[0] = synthesize_video_insights(video_insights)
-                        synthesis_done.set()
-
-                    synthesis_thread = threading.Thread(target=run_synthesis)
-                    synthesis_thread.start()
+                        synthesis_thread = threading.Thread(target=run_synthesis)
+                        synthesis_thread.start()
 
                     # Cycle through sub-steps while waiting for synthesis to complete
                     substep_idx = 0
                     while not synthesis_done.is_set():
-                        current_substep = synthesis_substeps[substep_idx % len(synthesis_substeps)]
-                        yield send_progress("synthesis", "Cross-referencing reviewer opinions", f"→ {current_substep}...")
-                        substep_idx += 1
+                        if synthesis_substeps:
+                            current_substep = synthesis_substeps[substep_idx % len(synthesis_substeps)]
+                            yield send_progress("synthesis", "Cross-referencing reviewer opinions", f"→ {current_substep}...")
+                            substep_idx += 1
                         # Wait up to 1.5 seconds before showing next sub-step
                         synthesis_done.wait(timeout=1.5)
 
-                    synthesis_thread.join()
+                    if synthesis_thread:
+                        synthesis_thread.join()
                     synthesis = synthesis_result[0]
-                    timing.synthesis_seconds = time.time() - step_start
+                    timing.synthesis_seconds = time.time() - synthesis_step_start
                     yield send_progress("synthesis", "Cross-referencing reviewer opinions", "→ Complete")
                 else:
                     synthesis = None
