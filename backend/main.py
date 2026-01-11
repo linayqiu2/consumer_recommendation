@@ -2611,6 +2611,10 @@ async def chat_stream(request: ChatRequest):
             def send_event(event_type: str, data: dict):
                 return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
+            # Helper to send keepalive ping (prevents Railway proxy timeout)
+            def send_keepalive():
+                return ": keepalive\n\n"
+
             # Define progress steps for PRODUCT flow (credibility display)
             PROGRESS_STEPS = [
                 ("classify", "Analyzing query"),
@@ -2773,13 +2777,19 @@ async def chat_stream(request: ChatRequest):
             transcript_thread.start()
 
             # Poll the queue and yield progress updates
+            last_keepalive = time.time()
             while transcript_thread.is_alive() or not transcript_queue.empty():
                 try:
-                    fetched, valid, title, is_valid = transcript_queue.get(timeout=0.1)
+                    fetched, valid, title, is_valid = transcript_queue.get(timeout=0.5)
                     short_title = title[:30] + "..." if len(title) > 30 else title
+                    last_keepalive = time.time()
                     status = "✓" if is_valid else "○"
                     yield send_progress("transcripts", "Fetching video transcripts", f"→ {valid} valid, {status} {short_title}")
                 except queue.Empty:
+                    # Send keepalive ping every 5 seconds to prevent proxy timeout
+                    if time.time() - last_keepalive > 5:
+                        yield send_keepalive()
+                        last_keepalive = time.time()
                     continue
 
             transcript_thread.join()
@@ -2859,6 +2869,7 @@ async def chat_stream(request: ChatRequest):
                         synthesis_done.set()
 
                     # Poll the queue and yield progress updates
+                    last_keepalive = time.time()
                     while extraction_thread.is_alive() or not progress_queue.empty() or not insights_queue.empty():
                         # Collect any ready insights
                         try:
@@ -2884,11 +2895,16 @@ async def chat_stream(request: ChatRequest):
 
                         # Check for progress updates
                         try:
-                            completed, total, title = progress_queue.get(timeout=0.1)
+                            completed, total, title = progress_queue.get(timeout=0.5)
                             # Truncate title for cleaner display
                             short_title = title[:35] + "..." if len(title) > 35 else title
                             yield send_progress("insights", "Analyzing video content", f"→ {completed}/{total}: {short_title}")
+                            last_keepalive = time.time()
                         except queue.Empty:
+                            # Send keepalive ping every 5 seconds to prevent proxy timeout
+                            if time.time() - last_keepalive > 5:
+                                yield send_keepalive()
+                                last_keepalive = time.time()
                             continue
 
                     extraction_thread.join()
@@ -2953,6 +2969,9 @@ async def chat_stream(request: ChatRequest):
                             current_substep = synthesis_substeps[substep_idx % len(synthesis_substeps)]
                             yield send_progress("synthesis", "Cross-referencing reviewer opinions", f"→ {current_substep}...")
                             substep_idx += 1
+                        else:
+                            # Send keepalive if no substeps defined
+                            yield send_keepalive()
                         # Wait up to 1.5 seconds before showing next sub-step
                         synthesis_done.wait(timeout=1.5)
 
