@@ -267,6 +267,39 @@ def build_conversation_context(history: list) -> str:
     return summarize_conversation(history)
 
 
+def get_last_assistant_message(history: list) -> str:
+    """Get the full content of the last assistant message.
+
+    Used when user references previous content (e.g., 'translate the above').
+    Returns full content without truncation.
+    """
+    if not history:
+        return ""
+
+    # Find the last assistant message
+    for msg in reversed(history):
+        msg_role = msg.get('role') if isinstance(msg, dict) else getattr(msg, 'role', None)
+        if msg_role == 'assistant':
+            msg_content = msg.get('content', '') if isinstance(msg, dict) else getattr(msg, 'content', '')
+            return msg_content
+
+    return ""
+
+
+def needs_full_content(query: str) -> bool:
+    """Check if the query needs full previous content (not truncated).
+
+    Returns True for queries like 'translate the above', 'summarize that', etc.
+    """
+    query_lower = query.lower()
+    reference_patterns = [
+        'translate', 'summarize', 'rewrite', 'rephrase',
+        'the above', 'that response', 'this response',
+        '翻译', '总结', '改写'  # Chinese equivalents
+    ]
+    return any(pattern in query_lower for pattern in reference_patterns)
+
+
 # YouTube Topic IDs for precise video discovery
 # Reference: https://developers.google.com/youtube/v3/docs/search/list#topicId
 # Values can be a single topic ID (str) or a list of topic IDs (list) for broader coverage
@@ -1573,11 +1606,30 @@ Current query: {user_query}"""
     print(f"Query: '{user_query[:60]}...' -> Classified as: {classification}")
     return classification
 
-def generate_chat_response(user_query: str) -> str:
-    """Generate a regular conversational response."""
-    system_prompt = "You are a friendly product advisor assistant. The user has sent a message that isn't about product recommendations. Respond helpfully and let them know you can help with product recommendations, reviews, and buying advice. Keep responses brief and friendly."
+def generate_chat_response(user_query: str, conversation_context: str = "", full_last_message: str = "") -> str:
+    """Generate a regular conversational response.
 
-    return call_gpt5("gpt-5-mini", system_prompt, user_query)
+    Args:
+        user_query: The current user query
+        conversation_context: Summarized/truncated context for understanding
+        full_last_message: Full content of last assistant message (for translate/summarize)
+    """
+    system_prompt = "You are a friendly product advisor assistant. If the user wants to translate, summarize, or otherwise operate on previous content, use the 'Previous content to operate on' provided. Otherwise, respond helpfully and let them know you can help with product recommendations, reviews, and buying advice. Keep responses brief and friendly."
+
+    if full_last_message:
+        # User wants to operate on previous content
+        user_prompt = f"""Previous content to operate on:
+{full_last_message}
+
+User request: {user_query}"""
+    elif conversation_context:
+        user_prompt = f"""Context: {conversation_context}
+
+User request: {user_query}"""
+    else:
+        user_prompt = user_query
+
+    return call_gpt5("gpt-5-mini", system_prompt, user_prompt)
 
 def generate_search_response(user_query: str, conversation_context: str = "") -> tuple[str, List[dict]]:
     """Handle SEARCH queries - quick web lookup for factual/current info.
@@ -2537,9 +2589,14 @@ async def chat(request: ChatRequest):
         total_start = time.time()
         timing = TimingInfo()
 
+        # Build conversation context from history
+        history_for_context = [{"role": msg.role, "content": msg.content} for msg in request.conversation_history]
+        conversation_context = build_conversation_context(history_for_context)
+
         # If search is disabled, always use chat response (for debugging)
         if request.disable_search:
-            chat_response = generate_chat_response(request.query)
+            full_last_msg = get_last_assistant_message(history_for_context) if needs_full_content(request.query) else ""
+            chat_response = generate_chat_response(request.query, conversation_context, full_last_msg)
             return ChatResponse(
                 answer=chat_response,
                 videos=[],
@@ -2549,13 +2606,14 @@ async def chat(request: ChatRequest):
 
         # Step 0: Classify query into CHAT, SEARCH, or PRODUCT
         step_start = time.time()
-        query_type = classify_query(request.query)
+        query_type = classify_query(request.query, conversation_context)
         timing.classify_query_seconds = time.time() - step_start
         print(f"Query: '{request.query}' -> Classified as: {query_type} ({timing.classify_query_seconds:.2f}s)")
 
         if query_type == "CHAT":
             # Handle as regular conversation - no search needed
-            chat_response = generate_chat_response(request.query)
+            full_last_msg = get_last_assistant_message(history_for_context) if needs_full_content(request.query) else ""
+            chat_response = generate_chat_response(request.query, conversation_context, full_last_msg)
             return ChatResponse(
                 answer=chat_response,
                 videos=[],
@@ -2814,7 +2872,8 @@ async def chat_stream(request: ChatRequest):
             # If search is disabled, stream a simple response
             if request.disable_search:
                 yield send_event("progress", {"step": "chat", "message": "Generating response..."})
-                chat_response = generate_chat_response(request.query)
+                full_last_msg = get_last_assistant_message(history_for_context) if needs_full_content(request.query) else ""
+                chat_response = generate_chat_response(request.query, conversation_context, full_last_msg)
                 yield send_event("answer_chunk", {"text": chat_response})
                 yield send_event("done", {})
                 return
@@ -2828,7 +2887,8 @@ async def chat_stream(request: ChatRequest):
 
             if query_type == "CHAT":
                 yield send_event("progress", {"step": "chat", "message": "Generating conversational response..."})
-                chat_response = generate_chat_response(request.query)
+                full_last_msg = get_last_assistant_message(history_for_context) if needs_full_content(request.query) else ""
+                chat_response = generate_chat_response(request.query, conversation_context, full_last_msg)
                 yield send_event("answer_chunk", {"text": chat_response})
                 yield send_event("done", {})
                 return
