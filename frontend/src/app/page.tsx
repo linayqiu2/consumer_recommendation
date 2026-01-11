@@ -583,95 +583,77 @@ export default function Home() {
     return 0
   }
 
+  // Function to extract timestamp from URL &t= parameter
+  const extractTimestampFromUrl = (url: string): number => {
+    const match = url.match(/[&?]t=(\d+)/)
+    if (match) {
+      return parseInt(match[1])
+    }
+    return 0
+  }
+
   // Function to handle timestamp click
   const handleTimestampClick = (e: React.MouseEvent<HTMLElement>, messageVideos?: VideoInfo[], debugInfo?: DebugInfo) => {
     const target = e.target as HTMLElement
 
-    // Check if clicked element is a timestamp link
-    if (target.tagName === 'A' && target.textContent?.match(/\[\d+:\d+\]/)) {
-      e.preventDefault()
-      const timestamp = target.textContent
-      const seconds = timestampToSeconds(timestamp)
+    // Check if clicked element is a link (either YouTube link with timestamp or timestamp text)
+    if (target.tagName === 'A') {
+      const href = (target as HTMLAnchorElement).href || ''
+      const isYouTubeLink = href.includes('youtube.com') || href.includes('youtu.be')
+      const hasTimestampInUrl = href.includes('&t=') || href.includes('?t=')
+      const hasTimestampInText = target.textContent?.match(/\[\d+:\d+\]/)
 
-      // Find the message container (scope search to current message only)
-      const messageContainer = target.closest('.prose')
+      // If it's a YouTube link with timestamp, intercept and open in embedded player
+      if (isYouTubeLink && (hasTimestampInUrl || hasTimestampInText)) {
+        e.preventDefault()
 
-      // Find the video URL - look for nearby links in the same paragraph or sentence
-      const parent = target.closest('p, li, blockquote')
-      if (parent) {
-        const links = parent.querySelectorAll('a[href*="youtube.com"], a[href*="youtu.be"]')
-        for (const link of Array.from(links)) {
-          const videoId = extractVideoId((link as HTMLAnchorElement).href)
-          if (videoId) {
-            // Try to find video metadata from the message's video list
-            const videoInfo = messageVideos?.find(v => v.video_id === videoId)
+        const videoId = extractVideoId(href)
+        if (!videoId) return
 
-            // Try to find insights for this video from debug info
-            const videoInsights = debugInfo?.answer_generation?.video_insights?.find(
-              (insight: any) => insight.url?.includes(videoId)
-            )
+        // Get timestamp - prefer URL parameter, fallback to text pattern
+        let seconds = extractTimestampFromUrl(href)
+        if (seconds === 0 && hasTimestampInText) {
+          seconds = timestampToSeconds(target.textContent || '')
+        }
 
-            setCurrentVideo({
-              videoId,
-              startTime: seconds,
-              title: videoInfo?.title || link.textContent || undefined,
-              channel: videoInfo?.channel,
-              thumbnail: videoInfo?.thumbnail,
-              view_count: videoInfo?.view_count,
-              like_count: videoInfo?.like_count,
-              insights: videoInsights
-            })
-            setShowVideoSidebar(true)
+        // Try to find video metadata from the message's video list
+        const videoInfo = messageVideos?.find(v => v.video_id === videoId)
 
-            // Track video click event
-            trackEvent('video_click', {
-              video_id: videoId,
-              video_title: videoInfo?.title || link.textContent || undefined,
-              channel: videoInfo?.channel,
-              start_time: seconds,
-              source: 'chat'
-            })
-            return
+        // Try to find insights for this video from debug info
+        const videoInsights = debugInfo?.answer_generation?.video_insights?.find(
+          (insight: any) => insight.url?.includes(videoId)
+        )
+
+        // Extract channel name from link text (format: "Channel at [MM:SS]")
+        let channelFromText: string | undefined
+        if (target.textContent) {
+          const channelMatch = target.textContent.match(/^(.+?)\s+at\s+\[/)
+          if (channelMatch) {
+            channelFromText = channelMatch[1]
           }
         }
-      }
 
-      // Fallback: search for any YouTube link in the current message only (not entire DOM)
-      if (messageContainer) {
-        const messageLinks = messageContainer.querySelectorAll('a[href*="youtube.com"], a[href*="youtu.be"]')
-        for (const link of Array.from(messageLinks)) {
-          const videoId = extractVideoId((link as HTMLAnchorElement).href)
-          if (videoId) {
-            const videoInfo = messageVideos?.find(v => v.video_id === videoId)
+        setCurrentVideo({
+          videoId,
+          startTime: seconds,
+          title: videoInfo?.title,
+          channel: videoInfo?.channel || channelFromText,
+          thumbnail: videoInfo?.thumbnail,
+          view_count: videoInfo?.view_count,
+          like_count: videoInfo?.like_count,
+          insights: videoInsights
+        })
+        setShowVideoSidebar(true)
 
-            // Try to find insights for this video from debug info
-            const videoInsights = debugInfo?.answer_generation?.video_insights?.find(
-              (insight: any) => insight.url?.includes(videoId)
-            )
-
-            setCurrentVideo({
-              videoId,
-              startTime: seconds,
-              title: videoInfo?.title,
-              channel: videoInfo?.channel,
-              thumbnail: videoInfo?.thumbnail,
-              view_count: videoInfo?.view_count,
-              like_count: videoInfo?.like_count,
-              insights: videoInsights
-            })
-            setShowVideoSidebar(true)
-
-            // Track video click event
-            trackEvent('video_click', {
-              video_id: videoId,
-              video_title: videoInfo?.title,
-              channel: videoInfo?.channel,
-              start_time: seconds,
-              source: 'chat'
-            })
-            return
-          }
-        }
+        // Track video click event
+        trackEvent('video_click', {
+          video_id: videoId,
+          video_title: videoInfo?.title,
+          channel: videoInfo?.channel || channelFromText,
+          start_time: seconds,
+          source: 'chat'
+        })
+        return
       }
     }
   }
@@ -1013,19 +995,41 @@ export default function Home() {
     const target = e.target as HTMLElement
     const textContent = target.textContent
 
-    // Check if clicked element is a timestamp link
-    if (target.tagName === 'A' && textContent && textContent.match(/\[\d+:\d+\]/)) {
-      e.preventDefault()
-      const seconds = timestampToSeconds(textContent)
+    // Check if clicked element is a link
+    if (target.tagName === 'A') {
+      const href = (target as HTMLAnchorElement).href || ''
+      const isYouTubeLink = href.includes('youtube.com') || href.includes('youtu.be')
+      const hasTimestampInUrl = href.includes('&t=') || href.includes('?t=')
+      const hasTimestampInText = textContent?.match(/\[\d+:\d+\]/)
 
-      // Helper function to find video and show sidebar
-      const showVideoWithId = (videoId: string, title?: string | null) => {
+      // If it's a YouTube link with timestamp, intercept and open in embedded player
+      if (isYouTubeLink && (hasTimestampInUrl || hasTimestampInText)) {
+        e.preventDefault()
+
+        const videoId = extractVideoId(href)
+        if (!videoId) return
+
+        // Get timestamp - prefer URL parameter, fallback to text pattern
+        let seconds = extractTimestampFromUrl(href)
+        if (seconds === 0 && hasTimestampInText) {
+          seconds = timestampToSeconds(textContent || '')
+        }
+
+        // Extract channel name from link text (format: "Channel at [MM:SS]")
+        let channelFromText: string | undefined
+        if (textContent) {
+          const channelMatch = textContent.match(/^(.+?)\s+at\s+\[/)
+          if (channelMatch) {
+            channelFromText = channelMatch[1]
+          }
+        }
+
         const videoInfo = selectedArticle.videos?.find(v => v.video_id === videoId)
         setCurrentVideo({
           videoId,
           startTime: seconds,
-          title: videoInfo?.title || title || undefined,
-          channel: videoInfo?.channel,
+          title: videoInfo?.title,
+          channel: videoInfo?.channel || channelFromText,
           thumbnail: videoInfo?.thumbnail,
           view_count: videoInfo?.view_count,
           like_count: videoInfo?.like_count,
@@ -1035,52 +1039,11 @@ export default function Home() {
         // Track video click event
         trackEvent('video_click', {
           video_id: videoId,
-          video_title: videoInfo?.title || title || undefined,
-          channel: videoInfo?.channel,
+          video_title: videoInfo?.title,
+          channel: videoInfo?.channel || channelFromText,
           start_time: seconds,
           source: 'article'
         })
-      }
-
-      // Find the video URL - look for nearby links in the same paragraph or sentence
-      const parent = target.closest('p, li, blockquote')
-      if (parent) {
-        const links = parent.querySelectorAll('a[href*="youtube.com"], a[href*="youtu.be"]')
-        for (const link of Array.from(links)) {
-          const videoId = extractVideoId((link as HTMLAnchorElement).href)
-          if (videoId) {
-            showVideoWithId(videoId, link.textContent)
-            return
-          }
-        }
-      }
-
-      // Improved fallback: find the closest YouTube link that appears BEFORE this timestamp
-      const articleContent = target.closest('.prose')
-      if (articleContent) {
-        const allElements = Array.from(articleContent.querySelectorAll('*'))
-        const timestampIndex = allElements.indexOf(target)
-
-        // Search backwards from the timestamp to find the most recent YouTube link
-        for (let i = timestampIndex - 1; i >= 0; i--) {
-          const el = allElements[i]
-          if (el.tagName === 'A') {
-            const href = (el as HTMLAnchorElement).href
-            if (href && (href.includes('youtube.com') || href.includes('youtu.be'))) {
-              const videoId = extractVideoId(href)
-              if (videoId) {
-                showVideoWithId(videoId, el.textContent)
-                return
-              }
-            }
-          }
-        }
-      }
-
-      // Last fallback: use first video from article's video list
-      if (selectedArticle.videos && selectedArticle.videos.length > 0) {
-        const firstVideo = selectedArticle.videos[0]
-        showVideoWithId(firstVideo.video_id, firstVideo.title)
         return
       }
     }

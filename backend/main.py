@@ -1019,12 +1019,20 @@ def build_quote_markdown(quote_text: str, channel: str, url: str, timestamp: str
         timestamp: Timestamp in [MM:SS] format
 
     Returns:
-        Formatted markdown string like: *"quote"* — [Channel](url&t=seconds)
+        Formatted markdown string like: *"quote"* — [Channel at [MM:SS]](url&t=seconds)
     """
     linked_url = build_timestamped_youtube_link(url, timestamp)
     # Escape any quotes in the text
     escaped_text = quote_text.replace('"', '\\"') if quote_text else ""
-    return f'*"{escaped_text}"* — [{channel}]({linked_url})'
+    # Clean up timestamp format - ensure it's [MM:SS]
+    clean_ts = timestamp.strip() if timestamp else ""
+    if clean_ts and not clean_ts.startswith('['):
+        clean_ts = f'[{clean_ts}]'
+    # Include timestamp in visible link text for clickability
+    if clean_ts and clean_ts != '[00:00]':
+        return f'*"{escaped_text}"* — [{channel} at {clean_ts}]({linked_url})'
+    else:
+        return f'*"{escaped_text}"* — [{channel}]({linked_url})'
 
 
 def transform_insights_for_answer_generation(
@@ -2163,10 +2171,10 @@ STRICT GUIDELINES:
    - Use 4–6 memorable DIRECT QUOTES from video_insights if available.
    - Spread them across multiple channels (do NOT only quote one channel).
    - When quoting about a specific product, make that product explicitly clear.
-   - IMPORTANT: Each quote in the data includes a pre-built 'markdown_link' field.
-   - USE THE markdown_link VALUE DIRECTLY in your response - it already contains the properly formatted clickable link.
-   - Example: If a quote has markdown_link = '*"Great battery life"* — [MKBHD](https://youtube.com/watch?v=abc&t=247)'
-     Simply copy that exact string into your response.
+   - CRITICAL: Look for the 'markdown_link' field in each quote object within video_insights.products[].top_quotes[]
+   - The markdown_link field contains a READY-TO-USE formatted string like: *"quote text"* — [Channel](url&t=seconds)
+   - COPY THE markdown_link VALUE EXACTLY as-is into your response
+   - DO NOT construct your own links - use the pre-built markdown_link field
 
 5. Sources:
    - Make clear when insights come from video vs from web:
@@ -2205,7 +2213,9 @@ STRICT GUIDELINES:
         user_message = (
             "Here is the structured data you have access to. "
             "Use it to answer the user's question.\n\n"
-            f"{json.dumps(user_payload, ensure_ascii=False, indent=2)}"
+            f"{json.dumps(user_payload, ensure_ascii=False, indent=2)}\n\n"
+            "REMINDER: When including quotes, use the 'markdown_link' field from each quote object. "
+            "It contains a ready-to-use clickable link format."
         )
 
         answer = call_gpt5("gpt-5.1", system_prompt, user_message)
@@ -3161,6 +3171,21 @@ async def chat_stream(request: ChatRequest):
                     video_insights, synthesis
                 )
 
+                # Debug: Log first quote transformation to verify it's working
+                if transformed_insights:
+                    for ti in transformed_insights:
+                        for prod in ti.get('products', []):
+                            for quote in prod.get('top_quotes', []):
+                                if 'markdown_link' in quote:
+                                    print(f"[DEBUG] Transformed quote markdown_link: {quote['markdown_link'][:100]}...")
+                                    break
+                            else:
+                                continue
+                            break
+                        else:
+                            continue
+                        break
+
                 # Get the prompts for streaming
                 system_prompt = """You are an expert consumer product advisor who has already watched several YouTube review videos and read some web articles for the user.
 
@@ -3180,10 +3205,10 @@ STRICT GUIDELINES:
 2. Weave in comparisons where relevant
 3. Include consensus pros/cons per product
 4. Use 4-6 memorable DIRECT QUOTES from videos:
-   - IMPORTANT: Each quote in the data includes a pre-built 'markdown_link' field.
-   - USE THE markdown_link VALUE DIRECTLY in your response - it already contains the properly formatted clickable link.
-   - Example: If a quote has markdown_link = '*"Great battery life"* — [MKBHD](https://youtube.com/watch?v=abc&t=247)'
-     Simply copy that exact string into your response.
+   - CRITICAL: Look for the 'markdown_link' field in each quote object within video_insights.products[].top_quotes[]
+   - The markdown_link field contains a READY-TO-USE formatted string like: *"quote text"* — [Channel](url&t=seconds)
+   - COPY THE markdown_link VALUE EXACTLY as-is into your response
+   - DO NOT construct your own links - use the pre-built markdown_link field
    - Spread quotes across multiple channels (do NOT only quote one channel).
 5. Make clear when insights come from video vs web
 6. End with concrete recommendations
@@ -3210,7 +3235,9 @@ If conversation context is provided, use it to:
                 user_message = (
                     "Here is the structured data you have access to. "
                     "Use it to answer the user's question.\n\n"
-                    f"{json.dumps(user_payload, ensure_ascii=False, indent=2)}"
+                    f"{json.dumps(user_payload, ensure_ascii=False, indent=2)}\n\n"
+                    "REMINDER: When including quotes, use the 'markdown_link' field from each quote object. "
+                    "It contains a ready-to-use clickable link format."
                 )
 
                 # Stream the answer
@@ -3369,10 +3396,10 @@ STRICT GUIDELINES:
 2. Layout the overview of the article after the title
 3. Include references. For video references, include timestamps in the article
 4. Use 4-6 memorable DIRECT QUOTES from videos:
-   - IMPORTANT: Each quote in the data includes a pre-built 'markdown_link' field.
-   - USE THE markdown_link VALUE DIRECTLY in your response - it already contains the properly formatted clickable link.
-   - Example: If a quote has markdown_link = '*"Great battery life"* — [MKBHD](https://youtube.com/watch?v=abc&t=247)'
-     Simply copy that exact string into your response.
+   - CRITICAL: Look for the 'markdown_link' field in each quote object within video_insights.products[].top_quotes[]
+   - The markdown_link field contains a READY-TO-USE formatted string like: *"quote text"* — [Channel](url&t=seconds)
+   - COPY THE markdown_link VALUE EXACTLY as-is into your response
+   - DO NOT construct your own links - use the pre-built markdown_link field
    - Spread quotes across multiple channels (do NOT only quote one channel).
 5. Make clear when insights come from video vs web
 6. End with concrete interesting and insightful findings
@@ -3393,7 +3420,9 @@ Then continue with the article content."""
     user_message = (
         "Here is the structured data you have access to. "
         "Use it to write an engaging article.\n\n"
-        f"{json.dumps(user_payload, ensure_ascii=False, indent=2)}"
+        f"{json.dumps(user_payload, ensure_ascii=False, indent=2)}\n\n"
+        "REMINDER: When including quotes, use the 'markdown_link' field from each quote object. "
+        "It contains a ready-to-use clickable link format."
     )
 
     return call_gpt5("gpt-5.1", system_prompt, user_message)
