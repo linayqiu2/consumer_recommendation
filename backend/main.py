@@ -961,6 +961,163 @@ def format_transcript_with_timestamps(segments: List[dict]) -> str:
     return "\n".join(lines)
 
 
+def parse_timestamp_to_seconds(timestamp: str) -> int:
+    """
+    Convert [MM:SS] or MM:SS format to total seconds.
+
+    Args:
+        timestamp: String like "[01:23]", "01:23", "[1:23:45]", or "1:23:45"
+
+    Returns:
+        Total seconds as integer, or 0 if parsing fails
+    """
+    if not timestamp:
+        return 0
+    # Remove brackets if present
+    clean = timestamp.strip().strip('[]')
+
+    # Match HH:MM:SS or MM:SS
+    match = re.match(r'^(?:(\d+):)?(\d+):(\d+)$', clean)
+    if match:
+        hours = int(match.group(1) or 0)
+        minutes = int(match.group(2))
+        seconds = int(match.group(3))
+        return hours * 3600 + minutes * 60 + seconds
+
+    return 0
+
+
+def build_timestamped_youtube_link(url: str, timestamp: str) -> str:
+    """
+    Build a YouTube URL with timestamp parameter.
+
+    Args:
+        url: YouTube video URL
+        timestamp: Timestamp in [MM:SS] format
+
+    Returns:
+        URL with &t=SECONDS appended, or original URL if no valid timestamp
+    """
+    if not url:
+        return url
+    seconds = parse_timestamp_to_seconds(timestamp)
+    if seconds > 0:
+        # Handle URLs that may already have query params
+        separator = '&' if '?' in url else '?'
+        return f"{url}{separator}t={seconds}"
+    return url
+
+
+def build_quote_markdown(quote_text: str, channel: str, url: str, timestamp: str) -> str:
+    """
+    Build a pre-formatted markdown quote with clickable timestamp link.
+
+    Args:
+        quote_text: The quote text
+        channel: Channel name
+        url: Video URL
+        timestamp: Timestamp in [MM:SS] format
+
+    Returns:
+        Formatted markdown string like: *"quote"* — [Channel](url&t=seconds)
+    """
+    linked_url = build_timestamped_youtube_link(url, timestamp)
+    # Escape any quotes in the text
+    escaped_text = quote_text.replace('"', '\\"') if quote_text else ""
+    return f'*"{escaped_text}"* — [{channel}]({linked_url})'
+
+
+def transform_insights_for_answer_generation(
+    video_insights: List[dict],
+    synthesis: Optional[dict]
+) -> tuple[List[dict], Optional[dict]]:
+    """
+    Transform video insights and synthesis data to include pre-built markdown links.
+
+    This removes the burden from the LLM of converting timestamps and building links.
+    Each quote will have a 'markdown_link' field that can be used directly in the response.
+
+    Args:
+        video_insights: List of video insight dicts
+        synthesis: Optional synthesis dict
+
+    Returns:
+        Tuple of (transformed_video_insights, transformed_synthesis)
+    """
+    import copy
+
+    def transform_quote(quote: dict, channel: str, url: str) -> dict:
+        """Transform a single quote to include pre-built markdown."""
+        if not quote:
+            return quote
+        timestamp = quote.get('timestamp', '[00:00]')
+        text = quote.get('text', '')
+
+        return {
+            **quote,
+            'timestamp_seconds': parse_timestamp_to_seconds(timestamp),
+            'linked_url': build_timestamped_youtube_link(url, timestamp),
+            'markdown_link': build_quote_markdown(text, channel, url, timestamp)
+        }
+
+    # Transform video_insights
+    transformed_insights = []
+    for insight in video_insights:
+        channel = insight.get('channel', '')
+        url = insight.get('video_url') or insight.get('url', '')
+
+        transformed_insight = copy.deepcopy(insight)
+
+        # Transform top_quotes at insight level (if present)
+        if 'top_quotes' in transformed_insight:
+            transformed_insight['top_quotes'] = [
+                transform_quote(q, channel, url)
+                for q in transformed_insight.get('top_quotes', [])
+            ]
+
+        # Transform quotes in each product
+        if 'products' in transformed_insight:
+            for product in transformed_insight['products']:
+                if 'top_quotes' in product:
+                    product['top_quotes'] = [
+                        transform_quote(q, channel, url)
+                        for q in product.get('top_quotes', [])
+                    ]
+
+        # Transform emotional_highlights
+        if 'emotional_highlights' in transformed_insight:
+            transformed_insight['emotional_highlights'] = [
+                {
+                    **eh,
+                    'timestamp_seconds': parse_timestamp_to_seconds(eh.get('timestamp', '[00:00]')),
+                    'linked_url': build_timestamped_youtube_link(url, eh.get('timestamp', '[00:00]'))
+                }
+                for eh in transformed_insight.get('emotional_highlights', [])
+            ]
+
+        transformed_insights.append(transformed_insight)
+
+    # Transform synthesis
+    transformed_synthesis = None
+    if synthesis:
+        transformed_synthesis = copy.deepcopy(synthesis)
+
+        # Transform notable_quotes in each product
+        if 'products' in transformed_synthesis:
+            for product in transformed_synthesis['products']:
+                if 'notable_quotes' in product:
+                    product['notable_quotes'] = [
+                        transform_quote(
+                            q,
+                            q.get('channel', ''),
+                            q.get('url', '')
+                        )
+                        for q in product.get('notable_quotes', [])
+                    ]
+
+    return transformed_insights, transformed_synthesis
+
+
 def fetch_transcripts_parallel(
     videos: List[dict],
     max_transcripts: int = 10,
@@ -1935,6 +2092,12 @@ def generate_answer(user_query: str, videos_with_transcripts: List[dict], web_re
         if synthesis is None:
             print("Synthesis failed; continuing with video insights only (no fallback).")
 
+        # 2.5) Transform data to include pre-built markdown links for quotes
+        # This ensures timestamps are correctly converted to YouTube URL parameters
+        transformed_insights, transformed_synthesis = transform_insights_for_answer_generation(
+            video_insights, synthesis
+        )
+
         # 3) Build compact web context (titles + brief snippets)
         web_summaries = []
         if web_results:
@@ -2000,11 +2163,10 @@ STRICT GUIDELINES:
    - Use 4–6 memorable DIRECT QUOTES from video_insights if available.
    - Spread them across multiple channels (do NOT only quote one channel).
    - When quoting about a specific product, make that product explicitly clear.
-   - Format quotes like:
-     *"quote here"* — [Channel Name](video_url) at [MM:SS]
-   - IMPORTANT: The video_url MUST be the actual URL from that specific video's data, NOT a URL from another video
-   - IMPORTANT: Timestamps MUST be in [MM:SS] format (e.g., [04:07], [11:21]), NOT raw seconds
-   - Example: *"Great coffee"* — [Hiro | Days in Tokyo](https://youtube.com/watch?v=abc123) at [11:21]
+   - IMPORTANT: Each quote in the data includes a pre-built 'markdown_link' field.
+   - USE THE markdown_link VALUE DIRECTLY in your response - it already contains the properly formatted clickable link.
+   - Example: If a quote has markdown_link = '*"Great battery life"* — [MKBHD](https://youtube.com/watch?v=abc&t=247)'
+     Simply copy that exact string into your response.
 
 5. Sources:
    - Make clear when insights come from video vs from web:
@@ -2035,8 +2197,8 @@ STRICT GUIDELINES:
 
         user_payload = {
             "user_question": user_query,
-            "video_insights": video_insights,
-            "multi_video_synthesis": synthesis,
+            "video_insights": transformed_insights,
+            "multi_video_synthesis": transformed_synthesis,
             "web_articles": web_summaries,
         }
 
@@ -2993,6 +3155,12 @@ async def chat_stream(request: ChatRequest):
                         "snippet": content
                     })
 
+                # Transform data to include pre-built markdown links for quotes
+                # This ensures timestamps are correctly converted to YouTube URL parameters
+                transformed_insights, transformed_synthesis = transform_insights_for_answer_generation(
+                    video_insights, synthesis
+                )
+
                 # Get the prompts for streaming
                 system_prompt = """You are an expert consumer product advisor who has already watched several YouTube review videos and read some web articles for the user.
 
@@ -3011,9 +3179,12 @@ STRICT GUIDELINES:
 1. Start with a decision-first section with your top picks
 2. Weave in comparisons where relevant
 3. Include consensus pros/cons per product
-4. Use 4-6 memorable DIRECT QUOTES from videos, formatted as: *"quote here"* — [Channel Name](video_url) at [MM:SS]
-   - CRITICAL: Use the correct video_url for each quote - match the channel name to its video URL from the data
-   - CRITICAL: Timestamps MUST be in [MM:SS] format (e.g., [04:07], [11:21]), NOT raw seconds like "16" or "247"
+4. Use 4-6 memorable DIRECT QUOTES from videos:
+   - IMPORTANT: Each quote in the data includes a pre-built 'markdown_link' field.
+   - USE THE markdown_link VALUE DIRECTLY in your response - it already contains the properly formatted clickable link.
+   - Example: If a quote has markdown_link = '*"Great battery life"* — [MKBHD](https://youtube.com/watch?v=abc&t=247)'
+     Simply copy that exact string into your response.
+   - Spread quotes across multiple channels (do NOT only quote one channel).
 5. Make clear when insights come from video vs web
 6. End with concrete recommendations
 7. Be concise but specific; avoid generic phrasing
@@ -3031,8 +3202,8 @@ If conversation context is provided, use it to:
 
                 user_payload = {
                     "user_question": request.query,
-                    "video_insights": video_insights,
-                    "multi_video_synthesis": synthesis,
+                    "video_insights": transformed_insights,
+                    "multi_video_synthesis": transformed_synthesis,
                     "web_articles": web_summaries,
                 }
 
@@ -3175,6 +3346,11 @@ def generate_article_content(
                 "snippet": content
             })
 
+    # Transform data to include pre-built markdown links for quotes
+    transformed_insights, transformed_synthesis = transform_insights_for_answer_generation(
+        video_insights, synthesis
+    )
+
     system_prompt = """You are an expert consumer product critic who has already watched several YouTube review videos and read some web articles for the user.
 
 You have THREE key inputs:
@@ -3192,9 +3368,12 @@ STRICT GUIDELINES:
 1. Start the article with a compelling title on the FIRST LINE, formatted as: # Title Here
 2. Layout the overview of the article after the title
 3. Include references. For video references, include timestamps in the article
-4. Use 4-6 memorable DIRECT QUOTES from videos, formatted as: *"quote here"* — [Channel Name](video_url) at [MM:SS]
-   - CRITICAL: Use the correct video_url for each quote - match the channel name to its video URL from the data
-   - CRITICAL: Timestamps MUST be in [MM:SS] format (e.g., [04:07], [11:21]), NOT raw seconds like "16" or "247"
+4. Use 4-6 memorable DIRECT QUOTES from videos:
+   - IMPORTANT: Each quote in the data includes a pre-built 'markdown_link' field.
+   - USE THE markdown_link VALUE DIRECTLY in your response - it already contains the properly formatted clickable link.
+   - Example: If a quote has markdown_link = '*"Great battery life"* — [MKBHD](https://youtube.com/watch?v=abc&t=247)'
+     Simply copy that exact string into your response.
+   - Spread quotes across multiple channels (do NOT only quote one channel).
 5. Make clear when insights come from video vs web
 6. End with concrete interesting and insightful findings
 7. Be concise but specific; avoid generic phrasing
@@ -3206,8 +3385,8 @@ Then continue with the article content."""
 
     user_payload = {
         "user_question": user_query,
-        "video_insights": video_insights,
-        "multi_video_synthesis": synthesis,
+        "video_insights": transformed_insights,
+        "multi_video_synthesis": transformed_synthesis,
         "web_articles": web_summaries,
     }
 
