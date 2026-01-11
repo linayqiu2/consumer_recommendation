@@ -702,216 +702,269 @@ export default function Home() {
     setProgressMessage('Connecting...')
     setProgressSteps([]) // Clear previous progress steps
 
-    // Create new AbortController for this request
-    abortControllerRef.current = new AbortController()
+    const MAX_RETRIES = 2
+    let retryCount = 0
+    let streamCompleted = false
 
-    try {
-      const response = await fetch(`${API_URL}/chat/stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          query: userMessage,
-          max_videos: quickDebugMode ? 1 : 12,
-          disable_search: disableSearch,
-          conversation_history: conversationHistory,
-        }),
-        signal: abortControllerRef.current.signal,
-      })
+    while (retryCount <= MAX_RETRIES && !streamCompleted) {
+      // Create new AbortController for this request
+      abortControllerRef.current = new AbortController()
 
-      if (!response.ok) {
-        throw new Error('Failed to get response')
-      }
+      try {
+        if (retryCount > 0) {
+          console.log(`Retry attempt ${retryCount}/${MAX_RETRIES}...`)
+          setProgressMessage(`Connection interrupted. Retrying (${retryCount}/${MAX_RETRIES})...`)
+          // Remove any partial assistant message before retry
+          setMessages(prev => {
+            const lastMsg = prev[prev.length - 1]
+            if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.videos) {
+              return prev.slice(0, -1)
+            }
+            return prev
+          })
+          // Brief delay before retry
+          await new Promise(resolve => setTimeout(resolve, 1000))
+        }
 
-      const reader = response.body?.getReader()
-      if (!reader) {
-        throw new Error('No reader available')
-      }
+        const response = await fetch(`${API_URL}/chat/stream`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            query: userMessage,
+            max_videos: quickDebugMode ? 1 : 12,
+            disable_search: disableSearch,
+            conversation_history: conversationHistory,
+          }),
+          signal: abortControllerRef.current.signal,
+        })
 
-      const decoder = new TextDecoder()
-      let streamingContent = ''
-      let videos: VideoInfo[] = []
-      let sources = ''
-      let debug: DebugInfo | undefined
-      let hasAddedAssistantMessage = false // Track if we've added the assistant message
+        if (!response.ok) {
+          throw new Error('Failed to get response')
+        }
 
-      let buffer = ''
-      let eventType = ''
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+        const reader = response.body?.getReader()
+        if (!reader) {
+          throw new Error('No reader available')
+        }
 
-        buffer += decoder.decode(value, { stream: true })
+        const decoder = new TextDecoder()
+        let streamingContent = ''
+        let videos: VideoInfo[] = []
+        let sources = ''
+        let debug: DebugInfo | undefined
+        let hasAddedAssistantMessage = false // Track if we've added the assistant message
+        let receivedDoneEvent = false // Track if we received the done event
 
-        // Process complete SSE events from buffer
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || '' // Keep incomplete line in buffer
+        let buffer = ''
+        let eventType = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
 
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            eventType = line.slice(7)
-            console.log('SSE Event Type:', eventType)
-          } else if (line.startsWith('data: ')) {
-            const data = line.slice(6)
-            try {
-              const parsed = JSON.parse(data)
-              console.log('SSE Data for', eventType, ':', parsed)
+          buffer += decoder.decode(value, { stream: true })
 
-              if (eventType === 'progress') {
-                setProgressMessage(parsed.message || parsed.step)
+          // Process complete SSE events from buffer
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || '' // Keep incomplete line in buffer
 
-                // Update multi-step progress (Claude Code style)
-                const { step, step_index, total_steps, message, detail } = parsed
-                if (typeof step_index === 'number' && step_index >= 0) {
-                  setProgressSteps(prev => {
-                    const steps = [...prev]
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              eventType = line.slice(7)
+              console.log('SSE Event Type:', eventType)
+            } else if (line.startsWith('data: ')) {
+              const data = line.slice(6)
+              try {
+                const parsed = JSON.parse(data)
+                console.log('SSE Data for', eventType, ':', parsed)
 
-                    // Mark all previous steps as completed
-                    for (let i = 0; i < step_index; i++) {
-                      if (steps[i]) {
-                        steps[i] = { ...steps[i], status: 'completed' }
+                if (eventType === 'progress') {
+                  setProgressMessage(parsed.message || parsed.step)
+
+                  // Update multi-step progress (Claude Code style)
+                  const { step, step_index, total_steps, message, detail } = parsed
+                  if (typeof step_index === 'number' && step_index >= 0) {
+                    setProgressSteps(prev => {
+                      const steps = [...prev]
+
+                      // Mark all previous steps as completed
+                      for (let i = 0; i < step_index; i++) {
+                        if (steps[i]) {
+                          steps[i] = { ...steps[i], status: 'completed' }
+                        }
                       }
-                    }
 
-                    // Update or add current step
-                    steps[step_index] = {
-                      id: step,
-                      message,
-                      detail,
-                      status: 'in_progress'
-                    }
+                      // Update or add current step
+                      steps[step_index] = {
+                        id: step,
+                        message,
+                        detail,
+                        status: 'in_progress'
+                      }
 
-                    return steps
-                  })
-                }
-              } else if (eventType === 'answer_chunk') {
-                streamingContent += parsed.text
+                      return steps
+                    })
+                  }
+                } else if (eventType === 'answer_chunk') {
+                  streamingContent += parsed.text
 
-                // Add assistant message on first chunk (not during progress phase)
-                if (!hasAddedAssistantMessage) {
-                  hasAddedAssistantMessage = true
-                  // Clear progress steps when streaming starts - the response is now visible
-                  setProgressSteps([])
-                  setMessages(prev => [
-                    ...prev,
-                    {
-                      role: 'assistant',
-                      content: streamingContent,
-                    },
-                  ])
-                } else {
-                  // Update the last message with streaming content
+                  // Add assistant message on first chunk (not during progress phase)
+                  if (!hasAddedAssistantMessage) {
+                    hasAddedAssistantMessage = true
+                    // Clear progress steps when streaming starts - the response is now visible
+                    setProgressSteps([])
+                    setMessages(prev => [
+                      ...prev,
+                      {
+                        role: 'assistant',
+                        content: streamingContent,
+                      },
+                    ])
+                  } else {
+                    // Update the last message with streaming content
+                    setMessages(prev => {
+                      const newMessages = [...prev]
+                      const lastIdx = newMessages.length - 1
+                      if (lastIdx >= 0 && newMessages[lastIdx].role === 'assistant') {
+                        newMessages[lastIdx] = {
+                          ...newMessages[lastIdx],
+                          content: streamingContent,
+                        }
+                      }
+                      return newMessages
+                    })
+                  }
+                } else if (eventType === 'metadata') {
+                  videos = parsed.videos || []
+                  sources = parsed.sources_summary || ''
+                  debug = parsed.debug
+                  console.log('=== Metadata Event Received ===')
+                  console.log('Videos count:', videos.length)
+                  console.log('Has debug?:', !!debug)
+                  console.log('Sample video:', videos[0])
+                  // Update with final metadata
                   setMessages(prev => {
                     const newMessages = [...prev]
                     const lastIdx = newMessages.length - 1
                     if (lastIdx >= 0 && newMessages[lastIdx].role === 'assistant') {
                       newMessages[lastIdx] = {
                         ...newMessages[lastIdx],
-                        content: streamingContent,
+                        videos,
+                        sources,
+                        debug,
                       }
                     }
                     return newMessages
                   })
+                } else if (eventType === 'done') {
+                  receivedDoneEvent = true
+                } else if (eventType === 'error') {
+                  throw new Error(parsed.message || 'Unknown error')
                 }
-              } else if (eventType === 'metadata') {
-                videos = parsed.videos || []
-                sources = parsed.sources_summary || ''
-                debug = parsed.debug
-                console.log('=== Metadata Event Received ===')
-                console.log('Videos count:', videos.length)
-                console.log('Has debug?:', !!debug)
-                console.log('Sample video:', videos[0])
-                // Update with final metadata
-                setMessages(prev => {
-                  const newMessages = [...prev]
-                  const lastIdx = newMessages.length - 1
-                  if (lastIdx >= 0 && newMessages[lastIdx].role === 'assistant') {
-                    newMessages[lastIdx] = {
-                      ...newMessages[lastIdx],
-                      videos,
-                      sources,
-                      debug,
-                    }
-                  }
-                  return newMessages
-                })
-              } else if (eventType === 'error') {
-                throw new Error(parsed.message || 'Unknown error')
-              }
-            } catch (parseError) {
-              // Ignore parse errors for incomplete data
-              if (eventType === 'error') {
-                console.error('Stream error:', data)
+              } catch (parseError) {
+                // Ignore parse errors for incomplete data
+                if (eventType === 'error') {
+                  console.error('Stream error:', data)
+                }
               }
             }
           }
         }
-      }
 
-      setProgressMessage('')
+        // Check if stream completed successfully (received done event or metadata)
+        if (receivedDoneEvent || videos.length > 0) {
+          streamCompleted = true
+          setProgressMessage('')
 
-      // Save conversation after successful message exchange
-      // Use a callback to get the current messages state
-      setMessages(prev => {
-        // Only save if we have messages and the last one is from assistant with content
-        const lastMsg = prev[prev.length - 1]
-        if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content) {
-          saveConversation(prev)
+          // Save conversation after successful message exchange
+          // Use a callback to get the current messages state
+          setMessages(prev => {
+            // Only save if we have messages and the last one is from assistant with content
+            const lastMsg = prev[prev.length - 1]
+            if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content) {
+              saveConversation(prev)
+            }
+            return prev
+          })
+        } else if (streamingContent && !receivedDoneEvent) {
+          // Stream ended without done event - might have been interrupted
+          console.warn('Stream ended without done event, attempting retry...')
+          throw new Error('Stream interrupted')
         }
-        return prev
-      })
-    } catch (error) {
-      console.error('Error:', error)
-      setProgressMessage('')
 
-      // Check if this was an abort (user stopped generation)
-      const isAborted = error instanceof Error && error.name === 'AbortError'
+      } catch (error) {
+        console.error('Error:', error)
 
-      setMessages(prev => {
-        const lastMsg = prev[prev.length - 1]
+        // Check if this was an abort (user stopped generation)
+        const isAborted = error instanceof Error && error.name === 'AbortError'
 
-        // If there's an assistant message with content, append stopped message for abort
-        if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content) {
-          if (isAborted) {
+        if (isAborted) {
+          // User aborted - don't retry
+          setProgressMessage('')
+          setMessages(prev => {
+            const lastMsg = prev[prev.length - 1]
+
+            // If there's an assistant message with content, append stopped message
+            if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content) {
+              return [
+                ...prev.slice(0, -1),
+                {
+                  ...lastMsg,
+                  content: lastMsg.content + '\n\n*Generation stopped by user.*',
+                },
+              ]
+            }
+
+            // No assistant message yet (still in progress phase)
             return [
-              ...prev.slice(0, -1),
+              ...prev,
               {
-                ...lastMsg,
-                content: lastMsg.content + '\n\n*Generation stopped by user.*',
+                role: 'assistant',
+                content: '*Generation stopped by user.*',
               },
             ]
-          }
-          // Keep the partial content on error
-          return prev
+          })
+          break // Exit retry loop
         }
 
-        // No assistant message yet (still in progress phase)
-        if (isAborted) {
-          return [
-            ...prev,
-            {
-              role: 'assistant',
-              content: '*Generation stopped by user.*',
-            },
-          ]
-        }
+        // Network/stream error - try to retry
+        retryCount++
+        if (retryCount > MAX_RETRIES) {
+          // All retries exhausted
+          setProgressMessage('')
+          setMessages(prev => {
+            const lastMsg = prev[prev.length - 1]
 
-        // Error with no content yet
-        return [
-          ...prev,
-          {
-            role: 'assistant',
-            content: 'Sorry, I encountered an error processing your request. Please try again.',
-          },
-        ]
-      })
-    } finally {
-      setIsLoading(false)
-      setProgressMessage('')
-      setProgressSteps([])
-      abortControllerRef.current = null
+            // If there's an assistant message with partial content, keep it and add error note
+            if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content) {
+              return [
+                ...prev.slice(0, -1),
+                {
+                  ...lastMsg,
+                  content: lastMsg.content + '\n\n*Connection was interrupted. Please try again.*',
+                },
+              ]
+            }
+
+            // No content yet - show error message
+            return [
+              ...prev,
+              {
+                role: 'assistant',
+                content: 'Sorry, I encountered a connection error. Please try again.',
+              },
+            ]
+          })
+        }
+      }
     }
+
+    // Cleanup
+    setIsLoading(false)
+    setProgressMessage('')
+    setProgressSteps([])
+    abortControllerRef.current = null
   }
 
   const exampleQueries = [
