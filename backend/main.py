@@ -2252,8 +2252,7 @@ STRICT GUIDELINES:
    - Prefer products that appear most often and most positively across the video_insights.
    - Avoid hallucinating products that never appear.
    - Be concise but specific; avoid generic phrasing like "overall it's a good product" without details.
-   - If the sources don't fully answer something the user asked, say so explicitly and suggest what else they should look at.
-   - ALWAYS respond in English by default, regardless of what country is mentioned in the user's query. Only respond in a different language if the user explicitly requests it (e.g., "answer in Japanese", "respond in Chinese", or "translate to xyz").
+   - If the sources don’t fully answer something the user asked, say so explicitly and suggest what else they should look at.
 """
 
         user_payload = {
