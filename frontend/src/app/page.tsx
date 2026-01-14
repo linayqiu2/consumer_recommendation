@@ -151,13 +151,17 @@ function ConversationSidebar({
   conversations,
   currentConversationId,
   onSelectConversation,
-  onDeleteConversation
+  onDeleteConversation,
+  width,
+  onResizeStart
 }: {
   onNewChat: () => void
   conversations: ConversationHistory[]
   currentConversationId: string | null
   onSelectConversation: (conv: ConversationHistory) => void
   onDeleteConversation: (conversationId: string) => void
+  width: number
+  onResizeStart: (e: React.MouseEvent) => void
 }) {
   const { user } = useAuth()
 
@@ -195,7 +199,7 @@ function ConversationSidebar({
 
   // If logged in, show full sidebar with conversation history
   return (
-    <div className="hidden md:flex md:w-[260px] md:flex-col bg-gray-50">
+    <div className="hidden md:flex md:flex-col bg-gray-50 relative" style={{ width: `${width}px`, minWidth: '180px', maxWidth: '500px' }}>
       <div className="flex h-full flex-col">
         <div className="flex items-center gap-3 p-3">
           <button
@@ -264,6 +268,12 @@ function ConversationSidebar({
           </div>
         </div>
       </div>
+      {/* Resize handle - bright red for debugging, will change to subtle later */}
+      <div
+        onMouseDown={onResizeStart}
+        className="absolute top-0 right-0 w-2 h-full cursor-col-resize bg-red-500 hover:bg-sky-400 transition-colors z-50"
+        title="Drag to resize"
+      />
     </div>
   )
 }
@@ -298,6 +308,9 @@ export default function Home() {
   const [showVideoSidebar, setShowVideoSidebar] = useState(false)
   // Trends sidebar state (visible on landing, hidden in conversation by default)
   const [showTrendsSidebar, setShowTrendsSidebar] = useState(true)
+  // Chat history sidebar resizing
+  const [sidebarWidth, setSidebarWidth] = useState(260)
+  const [isResizing, setIsResizing] = useState(false)
   const [currentVideo, setCurrentVideo] = useState<{
     videoId: string;
     startTime: number;
@@ -440,6 +453,30 @@ export default function Home() {
     } catch (err) {
       console.error('Failed to delete conversation:', err)
     }
+  }
+
+  // Sidebar resize handlers
+  const handleSidebarResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsResizing(true)
+
+    const startX = e.clientX
+    const startWidth = sidebarWidth
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const newWidth = startWidth + (moveEvent.clientX - startX)
+      // Clamp between 180px and 500px
+      setSidebarWidth(Math.min(500, Math.max(180, newWidth)))
+    }
+
+    const handleMouseUp = () => {
+      setIsResizing(false)
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
   }
 
   // Fetch conversations when component mounts (for logged-in users)
@@ -963,7 +1000,7 @@ export default function Home() {
   if (showLanding) {
     return (
       <AuthProvider>
-        <div className="flex h-screen bg-gray-50 text-gray-900">
+        <div className={`flex h-screen bg-gray-50 text-gray-900 ${isResizing ? 'select-none cursor-col-resize' : ''}`}>
           {/* Left sidebar - Conversation history (only shown when logged in) */}
           <ConversationSidebar
             onNewChat={handleBackToLanding}
@@ -971,6 +1008,8 @@ export default function Home() {
             currentConversationId={currentConversationId}
             onSelectConversation={handleSelectConversation}
             onDeleteConversation={handleDeleteConversation}
+            width={sidebarWidth}
+            onResizeStart={handleSidebarResizeStart}
           />
 
           {/* Main section - Landing hero content */}
@@ -1402,7 +1441,7 @@ export default function Home() {
 
   return (
     <AuthProvider>
-    <div className="flex h-screen bg-white">
+    <div className={`flex h-screen bg-white ${isResizing ? 'select-none cursor-col-resize' : ''}`}>
       {/* Left Sidebar - login aware */}
       <ConversationSidebar
         onNewChat={handleBackToLanding}
@@ -1410,6 +1449,8 @@ export default function Home() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onDeleteConversation={handleDeleteConversation}
+        width={sidebarWidth}
+        onResizeStart={handleSidebarResizeStart}
       />
 
       {/* Main content */}
@@ -1575,6 +1616,30 @@ export default function Home() {
                         >
                           {message.content}
                         </ReactMarkdown>
+
+                        {/* Copy button for assistant messages */}
+                        {message.role === 'assistant' && message.content && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              navigator.clipboard.writeText(message.content)
+                              // Visual feedback - change icon temporarily
+                              const btn = e.currentTarget
+                              const originalHTML = btn.innerHTML
+                              btn.innerHTML = '<svg class="w-3.5 h-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>'
+                              setTimeout(() => {
+                                btn.innerHTML = originalHTML
+                              }, 1500)
+                            }}
+                            className="inline-flex items-center gap-1 mt-3 px-2 py-1 text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                            title="Copy response"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                            Copy
+                          </button>
+                        )}
                       </div>
 
                       {/* Video cards */}
