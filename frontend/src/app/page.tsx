@@ -1402,7 +1402,7 @@ export default function Home() {
 
   return (
     <AuthProvider>
-    <div className="flex h-screen bg-white">
+    <div className="flex h-screen bg-gray-50 text-gray-900">
       {/* Left Sidebar - login aware */}
       <ConversationSidebar
         onNewChat={handleBackToLanding}
@@ -1415,7 +1415,7 @@ export default function Home() {
       {/* Main content */}
       <div className="flex flex-1 flex-col">
         {/* Back Button Header - always visible */}
-        <div className="flex items-center justify-between p-2 border-b border-gray-200">
+        <div className="flex items-center justify-between p-2 border-b border-gray-200 bg-gray-50">
           <button
             onClick={handleBackToLanding}
             className="flex items-center gap-2 text-sm text-gray-700 hover:text-gray-900 transition-colors"
@@ -1470,7 +1470,7 @@ export default function Home() {
                     onClick={() => {
                       setInput(query)
                     }}
-                    className="rounded-lg border border-gray-300 p-4 text-left text-sm text-gray-700 hover:bg-gray-200 transition-colors"
+                    className="rounded-lg border border-gray-200 bg-white p-4 text-left text-sm text-gray-700 hover:bg-gray-100 hover:border-gray-300 transition-colors"
                   >
                     {query}
                   </button>
@@ -1488,7 +1488,7 @@ export default function Home() {
                 <div
                   key={index}
                   className={`${
-                    message.role === 'assistant' ? 'bg-gray-50' : ''
+                    message.role === 'assistant' ? 'bg-gray-100/50' : 'bg-gray-50'
                   }`}
                 >
                   <div className="mx-auto flex max-w-3xl gap-4 p-4 md:px-6 md:py-6">
@@ -1626,7 +1626,7 @@ export default function Home() {
 
               {/* Multi-step Progress indicator (Claude Code style) */}
               {isLoading && progressSteps.length > 0 && (
-                <div className="bg-gray-50">
+                <div className="bg-gray-100/50">
                   <div className="mx-auto flex max-w-3xl gap-4 p-4 md:px-6 md:py-6">
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm bg-[#10a37f]">
                       <svg
@@ -1679,7 +1679,7 @@ export default function Home() {
         </div>
 
         {/* Input area */}
-        <div className="border-t border-gray-300 bg-white p-4">
+        <div className="border-t border-gray-200 bg-gray-50 p-4">
           <form onSubmit={handleSubmit} className="mx-auto max-w-3xl">
             <div className="relative flex items-center">
               <input
