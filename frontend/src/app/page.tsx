@@ -151,13 +151,17 @@ function ConversationSidebar({
   conversations,
   currentConversationId,
   onSelectConversation,
-  onDeleteConversation
+  onDeleteConversation,
+  width = 260,
+  onResizeStart
 }: {
   onNewChat: () => void
   conversations: ConversationHistory[]
   currentConversationId: string | null
   onSelectConversation: (conv: ConversationHistory) => void
   onDeleteConversation: (conversationId: string) => void
+  width?: number
+  onResizeStart?: (e: React.MouseEvent) => void
 }) {
   const { user } = useAuth()
 
@@ -195,7 +199,19 @@ function ConversationSidebar({
 
   // If logged in, show full sidebar with conversation history
   return (
-    <div className="hidden md:flex md:w-[260px] md:flex-col bg-gray-50">
+    <div
+      className="hidden md:flex md:flex-col bg-gray-50 relative"
+      style={{ width: `${width}px` }}
+    >
+      {/* Resize handle */}
+      {onResizeStart && (
+        <div
+          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-sky-400 transition-colors z-10 group"
+          onMouseDown={onResizeStart}
+        >
+          <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-12 bg-gray-300 rounded-full group-hover:bg-sky-400 transition-colors" />
+        </div>
+      )}
       <div className="flex h-full flex-col">
         <div className="flex items-center gap-3 p-3">
           <button
@@ -313,6 +329,26 @@ export default function Home() {
   const [conversations, setConversations] = useState<ConversationHistory[]>([])
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null)
   const conversationIdRef = useRef<string | null>(null) // Sync ref to prevent duplicate saves
+
+  // Resizable sidebar state
+  const [sidebarWidth, setSidebarWidth] = useState(260)
+
+  const handleSidebarResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault()
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = Math.max(200, Math.min(500, e.clientX))
+      setSidebarWidth(newWidth)
+    }
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -971,6 +1007,8 @@ export default function Home() {
             currentConversationId={currentConversationId}
             onSelectConversation={handleSelectConversation}
             onDeleteConversation={handleDeleteConversation}
+            width={sidebarWidth}
+            onResizeStart={handleSidebarResizeStart}
           />
 
           {/* Main section - Landing hero content */}
@@ -1410,6 +1448,8 @@ export default function Home() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onDeleteConversation={handleDeleteConversation}
+        width={sidebarWidth}
+        onResizeStart={handleSidebarResizeStart}
       />
 
       {/* Main content */}
