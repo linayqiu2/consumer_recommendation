@@ -2593,8 +2593,11 @@ async def chat(request: ChatRequest):
             session_id=getattr(request, 'session_id', None),
             user_id=None  # TODO: Add user context when auth is integrated
         )
+        print(f"Logged chat query with ID: {query_log_id}")
     except Exception as log_err:
+        import traceback
         print(f"Warning: Failed to log chat query: {log_err}")
+        print(f"Traceback: {traceback.format_exc()}")
 
     try:
         # Start timing
@@ -2872,8 +2875,11 @@ async def chat_stream(request: ChatRequest):
             session_id=getattr(request, 'session_id', None),
             user_id=None
         )
+        print(f"Logged chat query with ID: {query_log_id}")
     except Exception as log_err:
+        import traceback
         print(f"Warning: Failed to log chat query: {log_err}")
+        print(f"Traceback: {traceback.format_exc()}")
 
     def generate_sse():
         # Use nonlocal to access query_log_id from outer scope
