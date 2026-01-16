@@ -236,6 +236,25 @@ def init_database():
             )
         """)
 
+        # Chat queries tracking table - tracks every chat request for debugging
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS chat_queries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                user_id INTEGER,
+                query TEXT NOT NULL,
+                query_type TEXT,
+                status TEXT DEFAULT 'pending',
+                error_message TEXT,
+                error_traceback TEXT,
+                response_length INTEGER,
+                videos_used INTEGER,
+                duration_seconds REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
+
         # Transcript cache table - persistent cache for YouTube video transcripts
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS transcript_cache (
@@ -270,6 +289,9 @@ def init_database():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_events_date ON user_events(created_at)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_events_session ON user_events(session_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_transcript_cache_created ON transcript_cache(created_at)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_queries_status ON chat_queries(status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_queries_created ON chat_queries(created_at)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_queries_session ON chat_queries(session_id)")
 
         conn.commit()
         print("Database initialized successfully.")
@@ -1039,6 +1061,103 @@ def log_user_event(
         """, (user_id, session_id, event_type, json.dumps(event_data)))
         conn.commit()
         return cursor.lastrowid
+
+
+def log_chat_query(
+    query: str,
+    session_id: Optional[str] = None,
+    user_id: Optional[int] = None,
+    query_type: Optional[str] = None
+) -> int:
+    """
+    Log a chat query. Call this at the start of a chat request.
+
+    Returns:
+        The ID of the logged query (use to update later).
+    """
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO chat_queries (session_id, user_id, query, query_type, status)
+            VALUES (?, ?, ?, ?, 'pending')
+        """, (session_id, user_id, query, query_type))
+        conn.commit()
+        return cursor.lastrowid
+
+
+def update_chat_query_success(
+    query_id: int,
+    response_length: int = 0,
+    videos_used: int = 0,
+    duration_seconds: float = 0
+) -> None:
+    """Update a chat query as successful."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE chat_queries
+            SET status = 'success',
+                response_length = ?,
+                videos_used = ?,
+                duration_seconds = ?
+            WHERE id = ?
+        """, (response_length, videos_used, duration_seconds, query_id))
+        conn.commit()
+
+
+def update_chat_query_error(
+    query_id: int,
+    error_message: str,
+    error_traceback: Optional[str] = None,
+    duration_seconds: float = 0
+) -> None:
+    """Update a chat query as failed."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE chat_queries
+            SET status = 'error',
+                error_message = ?,
+                error_traceback = ?,
+                duration_seconds = ?
+            WHERE id = ?
+        """, (error_message, error_traceback, duration_seconds, query_id))
+        conn.commit()
+
+
+def get_recent_chat_queries(hours: int = 24, limit: int = 100) -> List[Dict[str, Any]]:
+    """Get recent chat queries for admin dashboard."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, session_id, user_id, query, query_type, status,
+                   error_message, error_traceback, response_length, videos_used,
+                   duration_seconds, created_at
+            FROM chat_queries
+            WHERE created_at > datetime('now', ?)
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (f'-{hours} hours', limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def get_chat_query_stats(hours: int = 24) -> Dict[str, Any]:
+    """Get chat query statistics for admin dashboard."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT
+                COUNT(*) as total_queries,
+                SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success_count,
+                SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_count,
+                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_count,
+                AVG(duration_seconds) as avg_duration,
+                AVG(CASE WHEN status = 'success' THEN response_length END) as avg_response_length
+            FROM chat_queries
+            WHERE created_at > datetime('now', ?)
+        """, (f'-{hours} hours',))
+        row = cursor.fetchone()
+        return dict(row) if row else {}
 
 
 def get_user_usage_summary(user_id: int, days: int = 30) -> Dict[str, Any]:
