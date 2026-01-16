@@ -4478,6 +4478,32 @@ def admin_fix_schema(key: str = ""):
     return result
 
 
+@app.get("/admin/test-log")
+def admin_test_log(key: str = ""):
+    """Test endpoint to verify chat_queries logging works."""
+    if key != os.environ.get("ADMIN_KEY", "admin123"):
+        return {"error": "Invalid key"}
+
+    try:
+        query_id = db.log_chat_query(
+            query="test query from admin endpoint",
+            session_id="admin-test",
+            user_id=None
+        )
+        return {
+            "success": True,
+            "query_id": query_id,
+            "message": "Successfully logged test query"
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+
 @app.get("/admin/debug")
 def admin_debug(key: str = ""):
     """Debug endpoint to check database status and API keys."""
