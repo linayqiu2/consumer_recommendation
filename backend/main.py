@@ -12,6 +12,7 @@ import json
 import time
 import re
 import hashlib
+import html
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -2584,6 +2585,13 @@ def read_root():
 async def chat(request: ChatRequest):
     """Main chat endpoint - searches YouTube, gets transcripts, generates answer."""
 
+    # Log the query at the start
+    query_log_id = db.log_chat_query(
+        query=request.query,
+        session_id=getattr(request, 'session_id', None),
+        user_id=None  # TODO: Add user context when auth is integrated
+    )
+
     try:
         # Start timing
         total_start = time.time()
@@ -2609,6 +2617,12 @@ async def chat(request: ChatRequest):
         query_type = classify_query(request.query, conversation_context)
         timing.classify_query_seconds = time.time() - step_start
         print(f"Query: '{request.query}' -> Classified as: {query_type} ({timing.classify_query_seconds:.2f}s)")
+
+        # Update query log with classification
+        with db.get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE chat_queries SET query_type = ? WHERE id = ?", (query_type, query_log_id))
+            conn.commit()
 
         if query_type == "CHAT":
             # Handle as regular conversation - no search needed
@@ -2796,6 +2810,14 @@ async def chat(request: ChatRequest):
             timing=timing
         )
 
+        # Log success
+        db.update_chat_query_success(
+            query_id=query_log_id,
+            response_length=len(answer),
+            videos_used=len(videos_with_content),
+            duration_seconds=timing.total_seconds
+        )
+
         return ChatResponse(
             answer=answer,
             videos=video_infos,
@@ -2804,10 +2826,25 @@ async def chat(request: ChatRequest):
         )
 
     except HTTPException:
+        # Log error for HTTP exceptions
+        duration = time.time() - total_start if 'total_start' in locals() else 0
+        db.update_chat_query_error(
+            query_id=query_log_id,
+            error_message="HTTPException",
+            duration_seconds=duration
+        )
         raise
     except Exception as e:
         print(f"Error in chat endpoint: {e}")
         traceback.print_exc()
+        # Log error with traceback
+        duration = time.time() - total_start if 'total_start' in locals() else 0
+        db.update_chat_query_error(
+            query_id=query_log_id,
+            error_message=str(e),
+            error_traceback=traceback.format_exc(),
+            duration_seconds=duration
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/chat/stream")
@@ -2823,7 +2860,17 @@ async def chat_stream(request: ChatRequest):
     - done: {}
     """
 
+    # Log the query at the start (before generator)
+    query_log_id = db.log_chat_query(
+        query=request.query,
+        session_id=getattr(request, 'session_id', None),
+        user_id=None
+    )
+
     def generate_sse():
+        # Use nonlocal to access query_log_id from outer scope
+        nonlocal query_log_id
+
         try:
             total_start = time.time()
             timing = TimingInfo()
@@ -2884,6 +2931,12 @@ async def chat_stream(request: ChatRequest):
             query_type = classify_query(request.query, conversation_context)
             timing.classify_query_seconds = time.time() - step_start
             yield send_progress("classify", "Analyzing your query", f"→ {query_type.capitalize()} research")
+
+            # Update query log with classification
+            with db.get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("UPDATE chat_queries SET query_type = ? WHERE id = ?", (query_type, query_log_id))
+                conn.commit()
 
             if query_type == "CHAT":
                 yield send_event("progress", {"step": "chat", "message": "Generating conversational response..."})
@@ -3392,9 +3445,25 @@ If conversation context is provided, use it to:
             yield send_event("done", {})
             print(f"Streaming completed | Total time: {timing.total_seconds:.2f}s")
 
+            # Log success
+            db.update_chat_query_success(
+                query_id=query_log_id,
+                response_length=len(full_answer) if 'full_answer' in locals() else 0,
+                videos_used=len(videos_with_content) if 'videos_with_content' in locals() else 0,
+                duration_seconds=timing.total_seconds
+            )
+
         except Exception as e:
             print(f"Error in streaming chat: {e}")
             traceback.print_exc()
+            # Log error
+            duration = time.time() - total_start if 'total_start' in locals() else 0
+            db.update_chat_query_error(
+                query_id=query_log_id,
+                error_message=str(e),
+                error_traceback=traceback.format_exc(),
+                duration_seconds=duration
+            )
             yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
 
     return StreamingResponse(
@@ -4327,6 +4396,341 @@ def debug_db():
 
 
 # ================
+# ADMIN DASHBOARD
+# ================
+
+@app.get("/admin/debug")
+def admin_debug(key: str = ""):
+    """Debug endpoint to check database status."""
+    if key != os.environ.get("ADMIN_KEY", "admin123"):
+        return {"error": "Invalid key"}
+
+    import sqlite3
+    db_path = db.DB_PATH
+
+    result = {
+        "db_path": db_path,
+        "db_exists": os.path.exists(db_path),
+        "db_size_bytes": os.path.getsize(db_path) if os.path.exists(db_path) else 0,
+        "tables": [],
+        "chat_queries_count": 0,
+        "recent_queries": []
+    }
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # Get all tables
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        result["tables"] = [row[0] for row in cursor.fetchall()]
+
+        # Check chat_queries
+        if "chat_queries" in result["tables"]:
+            cursor.execute("SELECT COUNT(*) FROM chat_queries")
+            result["chat_queries_count"] = cursor.fetchone()[0]
+
+            cursor.execute("SELECT id, query, status, created_at FROM chat_queries ORDER BY created_at DESC LIMIT 5")
+            result["recent_queries"] = [
+                {"id": r[0], "query": r[1][:50], "status": r[2], "created_at": r[3]}
+                for r in cursor.fetchall()
+            ]
+
+        conn.close()
+    except Exception as e:
+        result["error"] = str(e)
+
+    return result
+
+ADMIN_KEY = os.environ.get("ADMIN_KEY", "admin123")  # Set in production!
+
+@app.get("/admin")
+def admin_dashboard(key: str = ""):
+    """
+    Simple HTML admin dashboard for debugging.
+    Access with ?key=YOUR_ADMIN_KEY
+    """
+    from fastapi.responses import HTMLResponse
+
+    # Check admin key
+    if key != ADMIN_KEY:
+        return HTMLResponse(
+            content="<h1>Access Denied</h1><p>Invalid admin key. Use ?key=YOUR_KEY</p>",
+            status_code=403
+        )
+
+    # Gather all data
+    try:
+        # Chat queries (last 24h)
+        recent_queries = db.get_recent_chat_queries(hours=24, limit=100)
+        query_stats = db.get_chat_query_stats(hours=24)
+
+        # Usage report
+        usage_report = db.get_usage_report(days=7)
+
+        # Batch errors
+        batch_errors = []
+        with db.get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT be.*, br.topics
+                FROM batch_errors be
+                LEFT JOIN batch_runs br ON be.batch_run_id = br.id
+                ORDER BY be.created_at DESC
+                LIMIT 20
+            """)
+            batch_errors = [dict(row) for row in cursor.fetchall()]
+
+        # Recent batch runs
+        batch_runs = db.get_batch_runs(limit=10)
+
+    except Exception as e:
+        return HTMLResponse(
+            content=f"<h1>Error Loading Data</h1><pre>{traceback.format_exc()}</pre>",
+            status_code=500
+        )
+
+    # Build HTML (using page_html to avoid shadowing html module)
+    page_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Admin Dashboard</title>
+        <meta http-equiv="refresh" content="30">
+        <style>
+            * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 20px; }}
+            h1 {{ color: #333; margin-bottom: 20px; }}
+            h2 {{ color: #555; margin: 20px 0 10px; padding-bottom: 5px; border-bottom: 2px solid #0ea5e9; }}
+            .card {{ background: white; border-radius: 8px; padding: 15px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
+            .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px; }}
+            .stat {{ background: white; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
+            .stat-value {{ font-size: 24px; font-weight: bold; color: #0ea5e9; }}
+            .stat-label {{ color: #666; font-size: 12px; margin-top: 5px; }}
+            table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+            th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #eee; }}
+            th {{ background: #f8f8f8; font-weight: 600; }}
+            .success {{ color: #22c55e; }}
+            .error {{ color: #ef4444; }}
+            .pending {{ color: #f59e0b; }}
+            .query-text {{ max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+            .error-msg {{ color: #ef4444; font-size: 11px; max-width: 400px; overflow: hidden; text-overflow: ellipsis; }}
+            pre {{ background: #f1f1f1; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 11px; }}
+            .timestamp {{ color: #888; font-size: 11px; }}
+            .refresh-note {{ color: #888; font-size: 12px; margin-bottom: 20px; }}
+        </style>
+    </head>
+    <body>
+        <h1>Admin Dashboard</h1>
+        <p class="refresh-note">Auto-refreshes every 30 seconds</p>
+
+        <h2>Query Stats (Last 24h)</h2>
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-value">{query_stats.get('total_queries') or 0}</div>
+                <div class="stat-label">Total Queries</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value success">{query_stats.get('success_count') or 0}</div>
+                <div class="stat-label">Successful</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value error">{query_stats.get('error_count') or 0}</div>
+                <div class="stat-label">Errors</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value pending">{query_stats.get('pending_count') or 0}</div>
+                <div class="stat-label">Pending</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{(query_stats.get('avg_duration') or 0):.1f}s</div>
+                <div class="stat-label">Avg Duration</div>
+            </div>
+        </div>
+
+        <h2>API Costs (Last 7 Days)</h2>
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-value">${(usage_report.get('totals') or {{}}).get('total_cost') or 0:.2f}</div>
+                <div class="stat-label">Total Cost</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{(usage_report.get('totals') or {{}}).get('total_requests') or 0:,}</div>
+                <div class="stat-label">Total Requests</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{(usage_report.get('totals') or {{}}).get('total_input_tokens') or 0:,}</div>
+                <div class="stat-label">Input Tokens</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{(usage_report.get('totals') or {{}}).get('total_output_tokens') or 0:,}</div>
+                <div class="stat-label">Output Tokens</div>
+            </div>
+        </div>
+
+        <h2>Recent Queries</h2>
+        <div class="card">
+            <table>
+                <tr>
+                    <th>Time</th>
+                    <th>Query</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Duration</th>
+                    <th>Videos</th>
+                    <th>Error</th>
+                </tr>
+    """
+
+    for q in recent_queries[:50]:
+        status_class = q['status'] or 'pending'
+        query_text = html.escape(q.get('query') or '')
+        error_msg = html.escape(q.get('error_message') or '')
+        error_preview = error_msg[:80]
+        created = q.get('created_at', '')[:19] if q.get('created_at') else ''
+        page_html += f"""
+                <tr>
+                    <td class="timestamp">{created}</td>
+                    <td class="query-text" title="{query_text}">{query_text[:50]}...</td>
+                    <td>{q.get('query_type') or '-'}</td>
+                    <td class="{status_class}">{q.get('status') or 'pending'}</td>
+                    <td>{(q.get('duration_seconds') or 0):.1f}s</td>
+                    <td>{q.get('videos_used') or '-'}</td>
+                    <td class="error-msg" title="{error_msg}">{error_preview}</td>
+                </tr>
+        """
+
+    page_html += """
+            </table>
+        </div>
+
+        <h2>Recent Errors</h2>
+        <div class="card">
+    """
+
+    error_queries = [q for q in recent_queries if q.get('status') == 'error'][:10]
+    if error_queries:
+        for eq in error_queries:
+            eq_query = html.escape(eq.get('query', 'Unknown'))[:100]
+            eq_error = html.escape(eq.get('error_message', 'No error message'))
+            eq_traceback = html.escape(eq.get('error_traceback', 'No traceback'))[:500]
+            eq_created = eq.get('created_at', '')[:19]
+            page_html += f"""
+            <div style="margin-bottom: 15px; padding: 10px; background: #fef2f2; border-radius: 4px;">
+                <strong>{eq_query}</strong>
+                <p class="error-msg">{eq_error}</p>
+                <pre>{eq_traceback}</pre>
+                <span class="timestamp">{eq_created}</span>
+            </div>
+            """
+    else:
+        page_html += "<p>No errors in the last 24 hours!</p>"
+
+    page_html += """
+        </div>
+
+        <h2>Batch Errors</h2>
+        <div class="card">
+            <table>
+                <tr>
+                    <th>Time</th>
+                    <th>Topic</th>
+                    <th>Stage</th>
+                    <th>Error</th>
+                </tr>
+    """
+
+    for be in batch_errors[:20]:
+        be_topic = html.escape(be.get('topic') or '-')
+        be_stage = html.escape(be.get('stage') or '-')
+        be_error = html.escape(be.get('error_message') or '')[:100]
+        be_created = (be.get('created_at') or '')[:19]
+        page_html += f"""
+                <tr>
+                    <td class="timestamp">{be_created}</td>
+                    <td>{be_topic}</td>
+                    <td>{be_stage}</td>
+                    <td class="error-msg">{be_error}</td>
+                </tr>
+        """
+
+    page_html += """
+            </table>
+        </div>
+
+        <h2>Recent Batch Runs</h2>
+        <div class="card">
+            <table>
+                <tr>
+                    <th>ID</th>
+                    <th>Started</th>
+                    <th>Status</th>
+                    <th>Articles</th>
+                    <th>Errors</th>
+                    <th>Time</th>
+                    <th>Topics</th>
+                </tr>
+    """
+
+    for br in batch_runs[:10]:
+        status_class = 'success' if br.get('status') == 'completed' else 'error'
+        br_status = html.escape(br.get('status') or '-')
+        topics_raw = br.get('topics') or ''
+        # topics can be a list or a string
+        if isinstance(topics_raw, list):
+            topics_raw = ', '.join(topics_raw)
+        br_topics = html.escape(str(topics_raw))[:50]
+        page_html += f"""
+                <tr>
+                    <td>{br.get('id', '-')}</td>
+                    <td class="timestamp">{(br.get('started_at') or '')[:19]}</td>
+                    <td class="{status_class}">{br_status}</td>
+                    <td>{br.get('total_articles') or 0}</td>
+                    <td>{br.get('total_errors') or 0}</td>
+                    <td>{(br.get('total_time_seconds') or 0):.1f}s</td>
+                    <td>{br_topics}</td>
+                </tr>
+        """
+
+    page_html += """
+            </table>
+        </div>
+
+        <h2>Cost by Model</h2>
+        <div class="card">
+            <table>
+                <tr>
+                    <th>Model</th>
+                    <th>Requests</th>
+                    <th>Input Tokens</th>
+                    <th>Output Tokens</th>
+                    <th>Cost</th>
+                </tr>
+    """
+
+    for model_data in usage_report.get('by_model', []):
+        model_name = html.escape(model_data.get('model') or '-')
+        page_html += f"""
+                <tr>
+                    <td>{model_name}</td>
+                    <td>{model_data.get('request_count') or 0:,}</td>
+                    <td>{model_data.get('total_input_tokens') or 0:,}</td>
+                    <td>{model_data.get('total_output_tokens') or 0:,}</td>
+                    <td>${model_data.get('total_cost') or 0:.4f}</td>
+                </tr>
+        """
+
+    page_html += """
+            </table>
+        </div>
+    </body>
+    </html>
+    """
+
+    return HTMLResponse(content=page_html)
+
+
+# ================
 # ARTICLES API ENDPOINTS (for landing page)
 # ================
 
@@ -4628,6 +5032,72 @@ def generate_evergreen_article(request: EvergreenRequest):
 
     except Exception as e:
         print(f"Error generating evergreen article: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ================
+# TRENDING ARTICLE GENERATION ENDPOINT
+# ================
+
+class TrendingRequest(BaseModel):
+    """Request body for trending article generation."""
+    topics: Optional[List[str]] = None  # If None, uses all topics from YOUTUBE_TOPIC_MAP
+    timeframe: Optional[str] = "week"  # today, week, month, year
+    max_videos_per_topic: int = 20
+    parallel_articles: int = 2
+    country: str = "US"
+    parallel_topics: bool = True
+    skip_synthesis: bool = False
+    save_to_db: bool = True
+
+
+class TrendingResponse(BaseModel):
+    """Response for trending article generation."""
+    batch_run_id: Optional[int]
+    summary: dict
+    articles: List[dict]
+    errors: List[dict]
+
+
+@app.post("/api/articles/trending/generate", response_model=TrendingResponse)
+def generate_trending_articles_endpoint(request: TrendingRequest):
+    """
+    Generate trending articles for specified topics.
+
+    Uses YouTube Topic IDs to discover trending review videos and generates
+    articles summarizing the content.
+    """
+    try:
+        print(f"\n=== Generating Trending Articles ===")
+        print(f"Topics: {request.topics or 'All'}")
+        print(f"Timeframe: {request.timeframe}")
+        print(f"Max videos per topic: {request.max_videos_per_topic}")
+        print(f"Parallel articles: {request.parallel_articles}")
+        print(f"Country: {request.country}")
+
+        result = generate_articles_from_trending_content(
+            topics=request.topics,
+            timeframe=request.timeframe,
+            max_videos_per_topic=request.max_videos_per_topic,
+            country=request.country,
+            parallel_articles=request.parallel_articles,
+            parallel_topics=request.parallel_topics,
+            skip_synthesis=request.skip_synthesis,
+            save_to_db=request.save_to_db
+        )
+
+        print(f"=== Trending Articles Complete ===\n")
+
+        return TrendingResponse(
+            batch_run_id=result.get("batch_run_id"),
+            summary=result.get("summary", {}),
+            articles=result.get("articles", []),
+            errors=result.get("errors", [])
+        )
+
+    except Exception as e:
+        print(f"Error generating trending articles: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
