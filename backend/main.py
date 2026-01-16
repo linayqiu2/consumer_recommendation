@@ -4399,6 +4399,71 @@ def debug_db():
 # ADMIN DASHBOARD
 # ================
 
+@app.get("/admin/fix-schema")
+def admin_fix_schema(key: str = ""):
+    """Fix missing tables in the database schema."""
+    if key != os.environ.get("ADMIN_KEY", "admin123"):
+        return {"error": "Invalid key"}
+
+    import sqlite3
+    db_path = db.DB_PATH
+
+    result = {
+        "db_path": db_path,
+        "actions": [],
+        "tables_before": [],
+        "tables_after": []
+    }
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # Get tables before
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        result["tables_before"] = [row[0] for row in cursor.fetchall()]
+
+        # Create chat_queries table if missing
+        if "chat_queries" not in result["tables_before"]:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_queries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT,
+                    user_id INTEGER,
+                    query TEXT NOT NULL,
+                    query_type TEXT,
+                    status TEXT DEFAULT 'pending',
+                    error_message TEXT,
+                    error_traceback TEXT,
+                    response_length INTEGER,
+                    videos_used INTEGER,
+                    duration_seconds REAL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_queries_status ON chat_queries(status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_queries_created ON chat_queries(created_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_queries_session ON chat_queries(session_id)")
+            conn.commit()
+            result["actions"].append("Created chat_queries table with indexes")
+        else:
+            result["actions"].append("chat_queries table already exists")
+
+        # Get tables after
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        result["tables_after"] = [row[0] for row in cursor.fetchall()]
+
+        conn.close()
+        result["success"] = True
+
+    except Exception as e:
+        result["error"] = str(e)
+        result["success"] = False
+
+    return result
+
+
 @app.get("/admin/debug")
 def admin_debug(key: str = ""):
     """Debug endpoint to check database status."""
