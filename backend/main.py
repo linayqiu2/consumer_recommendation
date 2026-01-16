@@ -2586,11 +2586,15 @@ async def chat(request: ChatRequest):
     """Main chat endpoint - searches YouTube, gets transcripts, generates answer."""
 
     # Log the query at the start
-    query_log_id = db.log_chat_query(
-        query=request.query,
-        session_id=getattr(request, 'session_id', None),
-        user_id=None  # TODO: Add user context when auth is integrated
-    )
+    query_log_id = None
+    try:
+        query_log_id = db.log_chat_query(
+            query=request.query,
+            session_id=getattr(request, 'session_id', None),
+            user_id=None  # TODO: Add user context when auth is integrated
+        )
+    except Exception as log_err:
+        print(f"Warning: Failed to log chat query: {log_err}")
 
     try:
         # Start timing
@@ -2861,11 +2865,15 @@ async def chat_stream(request: ChatRequest):
     """
 
     # Log the query at the start (before generator)
-    query_log_id = db.log_chat_query(
-        query=request.query,
-        session_id=getattr(request, 'session_id', None),
-        user_id=None
-    )
+    query_log_id = None
+    try:
+        query_log_id = db.log_chat_query(
+            query=request.query,
+            session_id=getattr(request, 'session_id', None),
+            user_id=None
+        )
+    except Exception as log_err:
+        print(f"Warning: Failed to log chat query: {log_err}")
 
     def generate_sse():
         # Use nonlocal to access query_log_id from outer scope
@@ -4466,14 +4474,23 @@ def admin_fix_schema(key: str = ""):
 
 @app.get("/admin/debug")
 def admin_debug(key: str = ""):
-    """Debug endpoint to check database status."""
+    """Debug endpoint to check database status and API keys."""
     if key != os.environ.get("ADMIN_KEY", "admin123"):
         return {"error": "Invalid key"}
+
+    # Check API keys (show if configured, not the actual values)
+    api_keys_status = {
+        "OPENAI_API_KEY": "configured" if os.environ.get("OPENAI_API_KEY") else "MISSING",
+        "YOUTUBE_API_KEY": "configured" if os.environ.get("YOUTUBE_API_KEY") else "MISSING",
+        "GOOGLE_SEARCH_API_KEY": "configured" if os.environ.get("GOOGLE_SEARCH_API_KEY") else "MISSING",
+        "GOOGLE_SEARCH_CX": "configured" if os.environ.get("GOOGLE_SEARCH_CX") else "MISSING",
+    }
 
     import sqlite3
     db_path = db.DB_PATH
 
     result = {
+        "api_keys": api_keys_status,
         "db_path": db_path,
         "db_exists": os.path.exists(db_path),
         "db_size_bytes": os.path.getsize(db_path) if os.path.exists(db_path) else 0,
