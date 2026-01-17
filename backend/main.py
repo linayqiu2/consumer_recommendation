@@ -1246,6 +1246,7 @@ def fetch_transcripts_parallel(
     max_transcripts: int = 10,
     max_workers: int = 5,
     country: str = "US",
+    additional_countries: List[str] = None,
     on_transcript_complete: Optional[Callable[[int, int, str, bool], None]] = None
 ) -> tuple[List[dict], List[dict]]:
     """
@@ -1255,7 +1256,8 @@ def fetch_transcripts_parallel(
         videos: List of video dicts (from ranking)
         max_transcripts: Stop after getting this many valid transcripts
         max_workers: Maximum parallel workers
-        country: Country code for language validation
+        country: Primary country code for language validation
+        additional_countries: Additional country codes to accept (e.g., for non-English queries, accept both detected language AND English)
         on_transcript_complete: Optional callback(fetched_count, valid_count, video_title, is_valid)
                                called each time a transcript is fetched
 
@@ -1268,10 +1270,18 @@ def fetch_transcripts_parallel(
     videos_with_content = []
     fetched_count = 0
 
+    # Build list of acceptable countries
+    acceptable_countries = [country]
+    if additional_countries:
+        acceptable_countries.extend(additional_countries)
+
     def fetch_for_video(video: dict) -> dict:
         """Fetch transcript for a single video and validate language."""
         transcript = get_transcript(video["video_id"])
-        is_valid = transcript is not None and is_transcript_language_match(transcript, country)
+        # Accept transcript if it matches ANY of the acceptable languages
+        is_valid = transcript is not None and any(
+            is_transcript_language_match(transcript, c) for c in acceptable_countries
+        )
         return {
             **video,
             "transcript": transcript if is_valid else None,
@@ -2842,11 +2852,14 @@ async def chat(request: ChatRequest):
         print(f"Getting transcripts for up to {max_videos_with_transcripts} videos from {len(ranked_videos)} ranked candidates (parallel)...")
 
         # Use parallel fetching for speed improvement
+        # Accept transcripts in detected language OR English (for mixed-language results)
+        additional_langs = ["US"] if detected_country != "US" else None
         videos_with_transcripts, videos_with_content = fetch_transcripts_parallel(
             videos=ranked_videos,
             max_transcripts=max_videos_with_transcripts,
             max_workers=5,
-            country="US"
+            country=detected_country,
+            additional_countries=additional_langs
         )
 
         timing.transcript_fetch_seconds = time.time() - step_start
@@ -3171,11 +3184,14 @@ async def chat_stream(request: ChatRequest):
             transcript_result = [None, None]  # [videos_with_transcripts, videos_with_content]
 
             def run_transcript_fetch():
+                # Accept transcripts in detected language OR English (for mixed-language results)
+                additional_langs = ["US"] if detected_country != "US" else None
                 result = fetch_transcripts_parallel(
                     videos=ranked_videos,
                     max_transcripts=10,
                     max_workers=5,
-                    country="US",
+                    country=detected_country,
+                    additional_countries=additional_langs,
                     on_transcript_complete=on_transcript_done
                 )
                 transcript_result[0], transcript_result[1] = result
