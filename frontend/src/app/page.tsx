@@ -779,13 +779,19 @@ export default function Home() {
         let eventType = ''
         while (true) {
           const { done, value } = await reader.read()
-          if (done) break
 
-          buffer += decoder.decode(value, { stream: true })
+          if (value) {
+            buffer += decoder.decode(value, { stream: true })
+          }
+
+          if (done) {
+            // Flush any remaining data in decoder
+            buffer += decoder.decode()
+          }
 
           // Process complete SSE events from buffer
           const lines = buffer.split('\n')
-          buffer = lines.pop() || '' // Keep incomplete line in buffer
+          buffer = done ? '' : (lines.pop() || '') // Keep incomplete line in buffer unless done
 
           for (const line of lines) {
             if (line.startsWith('event: ')) {
@@ -888,6 +894,9 @@ export default function Home() {
               }
             }
           }
+
+          // Exit loop after processing final buffer
+          if (done) break
         }
 
         // Check if stream completed successfully (received done event or metadata)
