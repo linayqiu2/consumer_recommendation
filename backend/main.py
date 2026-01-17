@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from datetime import datetime, timedelta
 from googleapiclient.discovery import build
+from langdetect import detect as langdetect_detect
 
 # Import database functions
 import database as db
@@ -156,6 +157,51 @@ COUNTRY_TO_LANGUAGE = {
 def get_language_for_country(country: str) -> str:
     """Get the language code for a country. Defaults to English."""
     return COUNTRY_TO_LANGUAGE.get(country.upper(), "en")
+
+
+# Language to country mapping (for YouTube search region filtering)
+LANGUAGE_TO_COUNTRY = {
+    "zh-cn": "CN",  # Simplified Chinese
+    "zh-tw": "TW",  # Traditional Chinese
+    "zh": "CN",     # Chinese (default to mainland)
+    "ja": "JP",     # Japanese
+    "ko": "KR",     # Korean
+    "de": "DE",     # German
+    "fr": "FR",     # French
+    "es": "ES",     # Spanish
+    "it": "IT",     # Italian
+    "pt": "BR",     # Portuguese (default to Brazil)
+    "ru": "RU",     # Russian
+    "nl": "NL",     # Dutch
+    "pl": "PL",     # Polish
+    "sv": "SE",     # Swedish
+    "no": "NO",     # Norwegian
+    "da": "DK",     # Danish
+    "fi": "FI",     # Finnish
+    "en": "US",     # English (default to US)
+}
+
+
+def detect_query_language(text: str) -> str:
+    """
+    Detect the language of a text query.
+    Returns ISO 639-1 language code (e.g., 'zh', 'ja', 'en').
+    """
+    try:
+        lang = langdetect_detect(text)
+        print(f"[Language Detection] Detected language: {lang} for query: {text[:50]}...")
+        return lang
+    except Exception as e:
+        print(f"[Language Detection] Failed to detect language: {e}, defaulting to 'en'")
+        return "en"
+
+
+def get_country_for_language(language: str) -> str:
+    """
+    Get the primary country code for a language.
+    Used for YouTube regionCode parameter.
+    """
+    return LANGUAGE_TO_COUNTRY.get(language.lower(), "US")
 
 
 def parse_duration(duration_str: str) -> int:
@@ -1440,13 +1486,14 @@ def generate_web_search_queries(user_query: str) -> List[str]:
     return [q.strip() for q in queries if q.strip()][:2]
 
 
-def search_youtube_batch(queries: List[str], max_results_per_query: int = 3) -> tuple[List[dict], set]:
+def search_youtube_batch(queries: List[str], max_results_per_query: int = 3, country: Optional[str] = None) -> tuple[List[dict], set]:
     """
     Search YouTube for multiple queries in parallel.
 
     Args:
         queries: List of search queries
         max_results_per_query: Max results per query
+        country: Optional country code for language/region filtering (e.g., "CN", "JP")
 
     Returns:
         Tuple of (all_videos, seen_ids)
@@ -1458,7 +1505,7 @@ def search_youtube_batch(queries: List[str], max_results_per_query: int = 3) -> 
 
     def search_single_query(query: str) -> tuple[str, List[dict]]:
         """Search for a single query and return results."""
-        results = search_youtube(query, max_results=max_results_per_query)
+        results = search_youtube(query, max_results=max_results_per_query, country=country)
         return query, results
 
     with ThreadPoolExecutor(max_workers=5) as executor:
@@ -1681,16 +1728,32 @@ If the search results don't fully answer the question, acknowledge that.{context
     result = call_gpt5("gpt-5-mini", system_prompt, user_prompt)
     return result, web_results
 
-def generate_search_queries(user_query: str, conversation_context: str = "") -> List[str]:
+def generate_search_queries(user_query: str, detected_language: str = "en", conversation_context: str = "") -> List[str]:
     """Generate optimized search queries from user input.
 
     Args:
         user_query: The current user query
+        detected_language: The detected language code of the query (e.g., 'zh', 'ja', 'en')
         conversation_context: Optional context from previous conversation for follow-up questions
     """
 
+    # Determine language instruction for query generation
+    if detected_language != "en":
+        language_instruction = f"""
+CRITICAL LANGUAGE REQUIREMENT:
+The user's query is in {detected_language.upper()} language. To ensure we find same-language videos:
+- Generate 70-80% of queries in {detected_language.upper()} (the user's native language)
+- Generate only 20-30% of queries in English
+- For example, if generating 5 queries, 4 should be in {detected_language.upper()} and 1 in English
+- This ensures YouTube returns mostly {detected_language.upper()}-language videos
+
+"""
+    else:
+        language_instruction = ""
+
     system_prompt = f""""You are an expert YouTube search-query generator for consumer research.
 Today's date is {datetime.now().strftime('%Y-%m-%d')}.
+{language_instruction}
 
 Given a user query, your task is to:
 1) Identify the query type:
@@ -2662,9 +2725,14 @@ async def chat(request: ChatRequest):
             )
 
         # PRODUCT flow: Full product research with YouTube + Web
+        # Detect query language for video search filtering
+        detected_lang = detect_query_language(request.query)
+        detected_country = get_country_for_language(detected_lang)
+        print(f"[Language] Detected: {detected_lang}, Country: {detected_country}")
+
         # Step 1: Generate optimized search queries for both YouTube and Web
         step_start = time.time()
-        search_queries = generate_search_queries(request.query)
+        search_queries = generate_search_queries(request.query, detected_lang)
         web_search_queries = generate_web_search_queries(request.query)
         timing.generate_queries_seconds = time.time() - step_start
         print(f"Generated queries in {timing.generate_queries_seconds:.2f}s")
@@ -2681,8 +2749,8 @@ async def chat(request: ChatRequest):
         videos_per_query = 3
         print(f"Generated {num_queries} YouTube queries, {videos_per_query} videos per query (parallel)")
 
-        # Use parallel batch search for speed
-        all_videos, seen_ids = search_youtube_batch(search_queries, max_results_per_query=videos_per_query)
+        # Use parallel batch search for speed (with language-based country filter)
+        all_videos, seen_ids = search_youtube_batch(search_queries, max_results_per_query=videos_per_query, country=detected_country)
 
         # Build query_results for debug info
         query_results = []
@@ -2978,9 +3046,14 @@ async def chat_stream(request: ChatRequest):
                 return
 
             # PRODUCT flow
+            # Detect query language for video search filtering
+            detected_lang = detect_query_language(request.query)
+            detected_country = get_country_for_language(detected_lang)
+            print(f"[Language] Detected: {detected_lang}, Country: {detected_country}")
+
             yield send_progress("generate_queries", "Preparing search strategy")
             step_start = time.time()
-            search_queries = generate_search_queries(request.query, conversation_context)
+            search_queries = generate_search_queries(request.query, detected_lang, conversation_context)
             web_search_queries = generate_web_search_queries(request.query)
             timing.generate_queries_seconds = time.time() - step_start
             yield send_progress("generate_queries", "Preparing search strategy", "→ Ready")
@@ -2995,8 +3068,8 @@ async def chat_stream(request: ChatRequest):
             yield send_progress("youtube_search", "Searching YouTube")
             step_start = time.time()
 
-            # Use parallel batch search for speed
-            all_videos, seen_ids = search_youtube_batch(search_queries, max_results_per_query=3)
+            # Use parallel batch search for speed (with language-based country filter)
+            all_videos, seen_ids = search_youtube_batch(search_queries, max_results_per_query=3, country=detected_country)
 
             # Build query_results for debug info
             query_results = []
@@ -4996,9 +5069,14 @@ def generate_evergreen_article(request: EvergreenRequest):
         print(f"Topic: {request.topic}")
         print(f"Max videos: {request.max_videos}")
 
+        # Detect query language for video search filtering
+        detected_lang = detect_query_language(request.query)
+        detected_country = get_country_for_language(detected_lang)
+        print(f"[Language] Detected: {detected_lang}, Country: {detected_country}")
+
         # Step 1: Generate search queries
         print("Step 1: Generating search queries...")
-        search_queries = generate_search_queries(request.query)
+        search_queries = generate_search_queries(request.query, detected_lang)
         web_search_queries = generate_web_search_queries(request.query)
         print(f"  YouTube queries: {search_queries}")
         print(f"  Web queries: {web_search_queries}")
@@ -5009,7 +5087,7 @@ def generate_evergreen_article(request: EvergreenRequest):
         seen_ids = set()
 
         for query in search_queries:
-            results = search_youtube(query, max_results=5)
+            results = search_youtube(query, max_results=5, country=detected_country)
             for v in results:
                 if v["video_id"] not in seen_ids:
                     seen_ids.add(v["video_id"])
