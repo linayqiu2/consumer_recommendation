@@ -4897,6 +4897,17 @@ def get_recent_articles(days: int = 7, limit: int = 10, article_type: Optional[s
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/articles/stats")
+def get_articles_stats():
+    """Get database statistics for the landing page."""
+    try:
+        stats = db.get_statistics()
+        return stats
+    except Exception as e:
+        print(f"Error fetching stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/articles/{article_id}")
 def get_article_by_id(article_id: int):
     """Get a single article by ID."""
@@ -4911,17 +4922,6 @@ def get_article_by_id(article_id: int):
     except Exception as e:
         print(f"Error fetching article {article_id}: {e}")
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/articles/stats")
-def get_articles_stats():
-    """Get database statistics for the landing page."""
-    try:
-        stats = db.get_statistics()
-        return stats
-    except Exception as e:
-        print(f"Error fetching stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
