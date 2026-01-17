@@ -3368,12 +3368,38 @@ If conversation context is provided, use it to:
                     "It contains a ready-to-use clickable link format."
                 )
 
-                # Stream the answer
+                # Stream the answer with keepalives to prevent timeout during LLM pauses
                 yield send_progress("answer", "Writing personalized recommendations")
-                for chunk in call_gpt5_streaming("gpt-5.1", system_prompt, user_message):
-                    if chunk:
+
+                # Use a queue-based approach for non-blocking streaming with keepalives
+                chunk_queue: queue.Queue = queue.Queue()
+                streaming_done = threading.Event()
+
+                def stream_to_queue():
+                    try:
+                        for chunk in call_gpt5_streaming("gpt-5.1", system_prompt, user_message):
+                            if chunk:
+                                chunk_queue.put(chunk)
+                    finally:
+                        streaming_done.set()
+
+                stream_thread = threading.Thread(target=stream_to_queue)
+                stream_thread.start()
+
+                last_activity = time.time()
+                while not streaming_done.is_set() or not chunk_queue.empty():
+                    try:
+                        chunk = chunk_queue.get(timeout=0.5)
                         full_answer += chunk
                         yield send_event("answer_chunk", {"text": chunk})
+                        last_activity = time.time()
+                    except queue.Empty:
+                        # Send keepalive every 5 seconds during pauses
+                        if time.time() - last_activity > 5:
+                            yield send_keepalive()
+                            last_activity = time.time()
+
+                stream_thread.join()
 
                 answer_gen_debug = AnswerGenerationDebug(
                     method_used="structured" if synthesis else "structured_no_synthesis",
