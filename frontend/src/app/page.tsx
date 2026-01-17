@@ -291,6 +291,7 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [isThinking, setIsThinking] = useState(false)
   const [showDebug, setShowDebug] = useState(false)
   const [disableSearch, setDisableSearch] = useState(false)
   const [quickDebugMode, setQuickDebugMode] = useState(false)
@@ -777,6 +778,29 @@ export default function Home() {
 
         let buffer = ''
         let eventType = ''
+        let lastChunkTime = Date.now()
+        let thinkingTimeout: NodeJS.Timeout | null = null
+
+        // Function to start thinking indicator after 2 seconds of no chunks
+        const startThinkingTimer = () => {
+          if (thinkingTimeout) clearTimeout(thinkingTimeout)
+          thinkingTimeout = setTimeout(() => {
+            if (hasAddedAssistantMessage) {
+              setIsThinking(true)
+            }
+          }, 2000)
+        }
+
+        // Function to clear thinking indicator
+        const clearThinking = () => {
+          if (thinkingTimeout) {
+            clearTimeout(thinkingTimeout)
+            thinkingTimeout = null
+          }
+          setIsThinking(false)
+          lastChunkTime = Date.now()
+        }
+
         while (true) {
           const { done, value } = await reader.read()
 
@@ -787,12 +811,14 @@ export default function Home() {
           if (done) {
             // Flush any remaining data in decoder
             buffer += decoder.decode()
+            clearThinking()
           }
 
           // Process complete SSE events from buffer
           const lines = buffer.split('\n')
           buffer = done ? '' : (lines.pop() || '') // Keep incomplete line in buffer unless done
 
+          let hasAnswerChunk = false
           for (const line of lines) {
             if (line.startsWith('event: ')) {
               eventType = line.slice(7)
@@ -831,6 +857,8 @@ export default function Home() {
                     })
                   }
                 } else if (eventType === 'answer_chunk') {
+                  hasAnswerChunk = true
+                  clearThinking()
                   streamingContent += parsed.text
 
                   // Add assistant message on first chunk (not during progress phase)
@@ -859,6 +887,8 @@ export default function Home() {
                       return newMessages
                     })
                   }
+                  // Start timer for next potential thinking pause
+                  startThinkingTimer()
                 } else if (eventType === 'metadata') {
                   videos = parsed.videos || []
                   sources = parsed.sources_summary || ''
@@ -899,10 +929,14 @@ export default function Home() {
           if (done) break
         }
 
+        // Clean up thinking timer
+        clearThinking()
+
         // Check if stream completed successfully (received done event or metadata)
         if (receivedDoneEvent || videos.length > 0) {
           streamCompleted = true
           setProgressMessage('')
+          setIsThinking(false)
 
           // Save conversation after successful message exchange
           // Use a callback to get the current messages state
@@ -1624,6 +1658,14 @@ export default function Home() {
                         >
                           {message.content}
                         </ReactMarkdown>
+                        {/* Thinking indicator - shows when LLM is pausing */}
+                        {isThinking && index === messages.length - 1 && message.role === 'assistant' && (
+                          <span className="inline-flex items-center ml-2 text-sky-500">
+                            <span className="thinking-dot thinking-dot-1">●</span>
+                            <span className="thinking-dot thinking-dot-2">●</span>
+                            <span className="thinking-dot thinking-dot-3">●</span>
+                          </span>
+                        )}
                       </div>
 
                       {/* Video cards */}
