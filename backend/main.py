@@ -737,12 +737,18 @@ def rank_videos_heuristic(videos: List[dict], max_to_select: int = 10) -> List[d
     return selected
 
 
-def rank_videos_with_llm(videos: List[dict], user_query: str, max_to_select: int = 10) -> List[dict]:
+def rank_videos_with_llm(videos: List[dict], user_query: str, max_to_select: int = 10, query_language: str = "en") -> List[dict]:
     """
     Use LLM to rank videos based on relevance to user query.
     Uses video title and description to determine which videos are most likely
     to contain useful information for the user's question.
     Falls back to heuristic ranking if LLM call fails.
+
+    Args:
+        videos: List of video dictionaries to rank
+        user_query: The user's original query
+        max_to_select: Maximum number of videos to select
+        query_language: Detected language code of the query (e.g., 'zh', 'ja', 'en')
     """
     if len(videos) <= max_to_select:
         return videos
@@ -757,17 +763,29 @@ def rank_videos_with_llm(videos: List[dict], user_query: str, max_to_select: int
             "description": v.get("description", "")[:300],  # Truncate long descriptions
         })
 
-    system_prompt = """You are a video relevance ranking assistant. Given a user's query and a list of YouTube videos (with title, channel, and description), rank the videos by how likely they are to contain useful, in-depth information to answer the user's question.
+    # Language-specific ranking instructions
+    if query_language != "en":
+        language_instruction = f"""
+CRITICAL - LANGUAGE REQUIREMENT (MUST FOLLOW):
+The user's query is in {query_language.upper()} language. You MUST:
+1. FIRST, identify which videos have titles in {query_language.upper()} (look for {query_language.upper()} characters in titles)
+2. Put ALL {query_language.upper()}-language videos at the BEGINNING of your ranking
+3. Then add English videos AFTER all {query_language.upper()} videos
+4. Target: Select 70-80% {query_language.upper()}-language videos (7-8 out of 10)
 
-IMPORTANT - Language Matching Rules:
-- Detect the language of the user's query first.
-- If the query is in a NON-ENGLISH language (Chinese, Japanese, Korean, Spanish, etc.):
-  * Put ALL videos in that same language FIRST in your ranking
-  * Then add high-quality English videos after the native language videos
-  * Target ratio: ~70-80% native language videos, ~20-30% English videos
-- If the query is in English, rank purely by relevance.
+For example, if selecting 10 videos and there are 8 Chinese videos available:
+- First 7-8 positions: {query_language.upper()}-language videos
+- Last 2-3 positions: English videos (if needed)
 
-Other ranking factors (apply within each language group):
+DO NOT skip {query_language.upper()}-language videos just because English videos seem more "professional" or "high quality".
+The user specifically wants content in their language."""
+    else:
+        language_instruction = ""
+
+    system_prompt = f"""You are a video relevance ranking assistant. Given a user's query and a list of YouTube videos (with title, channel, and description), rank the videos by how likely they are to contain useful, in-depth information to answer the user's question.
+{language_instruction}
+
+Ranking factors (apply within each language group):
 1. Direct relevance: Does the video appear to directly address the user's question?
 2. Review quality signals: Does it look like an in-depth review vs a short unboxing or reaction?
 3. Channel credibility: Is the channel name suggesting expertise?
@@ -2776,7 +2794,7 @@ async def chat(request: ChatRequest):
         # LLM considers video title, description, and user query to rank by relevance
         # Falls back to heuristic ranking (position + diversity) if LLM fails
         step_start = time.time()
-        ranked_videos = rank_videos_with_llm(all_videos, request.query, max_to_select=10)
+        ranked_videos = rank_videos_with_llm(all_videos, request.query, max_to_select=10, query_language=detected_lang)
         timing.video_ranking_seconds = time.time() - step_start
         print(f"Selected {len(ranked_videos)} videos for transcript generation (from {total_videos_found} candidates) ({timing.video_ranking_seconds:.2f}s)")
 
@@ -3093,7 +3111,7 @@ async def chat_stream(request: ChatRequest):
             # Rank videos
             yield send_progress("ranking", "Selecting most relevant videos")
             step_start = time.time()
-            ranked_videos = rank_videos_with_llm(all_videos, request.query, max_to_select=request.max_videos)
+            ranked_videos = rank_videos_with_llm(all_videos, request.query, max_to_select=request.max_videos, query_language=detected_lang)
             timing.video_ranking_seconds = time.time() - step_start
             # Calculate aggregated engagement stats for credibility display
             total_views = sum(v.get("view_count", 0) or 0 for v in ranked_videos)
@@ -5098,7 +5116,7 @@ def generate_evergreen_article(request: EvergreenRequest):
 
         # Step 3: Rank videos
         print("Step 3: Ranking videos...")
-        ranked_videos = rank_videos_with_llm(all_videos, request.query, max_to_select=request.max_videos)
+        ranked_videos = rank_videos_with_llm(all_videos, request.query, max_to_select=request.max_videos, query_language=detected_lang)
         print(f"  Selected {len(ranked_videos)} videos")
 
         # Step 3b: Fetch video statistics (view_count, like_count)
