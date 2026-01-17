@@ -714,10 +714,11 @@ def rank_videos_with_llm(videos: List[dict], user_query: str, max_to_select: int
     system_prompt = """You are a video relevance ranking assistant. Given a user's query and a list of YouTube videos (with title, channel, and description), rank the videos by how likely they are to contain useful, in-depth information to answer the user's question.
 
 Consider:
-1. Direct relevance: Does the video appear to directly address the user's question?
-2. Review quality signals: Does it look like an in-depth review vs a short unboxing or reaction?
-3. Channel credibility: Is the channel name suggesting expertise (e.g., tech reviewer names, professional channels)?
-4. Specificity: Does the video focus on the specific products/topics the user asked about?
+1. Language match: PREFER videos in the same language as the user's query. If the user's query is in Chinese, prioritize Chinese-language videos. If the query is in Japanese, prioritize Japanese videos, etc. However, high-quality English videos are still valuable and should be considered - aim for a good mix if both are available.
+2. Direct relevance: Does the video appear to directly address the user's question?
+3. Review quality signals: Does it look like an in-depth review vs a short unboxing or reaction?
+4. Channel credibility: Is the channel name suggesting expertise (e.g., tech reviewer names, professional channels)?
+5. Specificity: Does the video focus on the specific products/topics the user asked about?
 
 Return ONLY a JSON array of video indices (integers) in order from most relevant to least relevant.
 Example output: [3, 7, 1, 0, 5, 2, 4, 6]
