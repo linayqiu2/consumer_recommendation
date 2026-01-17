@@ -1313,13 +1313,8 @@ def fetch_transcripts_parallel(
                     if on_transcript_complete:
                         on_transcript_complete(fetched_count, len(videos_with_content), result['title'][:40], True)
 
-                    # Check if we have enough
-                    if len(videos_with_content) >= max_transcripts:
-                        print(f"Reached target of {max_transcripts} videos with transcripts")
-                        # Cancel remaining futures (best effort)
-                        for f in future_to_video:
-                            f.cancel()
-                        break
+                    # Note: We no longer exit early - process ALL videos to find the best ones
+                    # The caller will slice to max_transcripts from the full list
                 elif result.get("transcript") is not None:
                     print(f"  ✗ Wrong language transcript: {result['title'][:50]}...")
                     if on_transcript_complete:
@@ -1340,7 +1335,10 @@ def fetch_transcripts_parallel(
                 if on_transcript_complete:
                     on_transcript_complete(fetched_count, len(videos_with_content), original_video.get('title', 'unknown')[:40], False)
 
-    return videos_with_transcripts, videos_with_content
+    # Return all attempted videos, but limit valid transcripts to max_transcripts
+    # This ensures we process ALL ranked videos to find the best ones
+    print(f"Processed all {len(videos_with_transcripts)} videos, found {len(videos_with_content)} with valid transcripts")
+    return videos_with_transcripts, videos_with_content[:max_transcripts]
 
 
 # Country to expected script type mapping
@@ -1378,7 +1376,7 @@ COUNTRY_SCRIPT_MAP = {
 }
 
 
-def is_transcript_language_match(transcript: str, country: str = "US", sample_size: int = 500, threshold: float = 0.7) -> bool:
+def is_transcript_language_match(transcript: str, country: str = "US", sample_size: int = 500, threshold: float = 0.5) -> bool:
     """
     Check if a transcript's language matches the expected language for a country.
 
@@ -1389,7 +1387,7 @@ def is_transcript_language_match(transcript: str, country: str = "US", sample_si
         transcript: The transcript text to check
         country: ISO 3166-1 alpha-2 country code (default: "US")
         sample_size: Number of characters to sample from the beginning (default: 500)
-        threshold: Minimum ratio of expected script characters (default: 0.7)
+        threshold: Minimum ratio of expected script characters (default: 0.5, relaxed from 0.7 to accept mixed-language content)
 
     Returns:
         True if the transcript appears to match the expected language, False otherwise
@@ -2783,7 +2781,7 @@ async def chat(request: ChatRequest):
         # YouTube search - PARALLEL (multiple queries at once)
         step_start = time.time()
         num_queries = len(search_queries)
-        videos_per_query = 3
+        videos_per_query = 5  # Increased from 3 for better coverage
         print(f"Generated {num_queries} YouTube queries, {videos_per_query} videos per query (parallel)")
 
         # Use parallel batch search for speed (with language-based country filter)
@@ -2809,11 +2807,11 @@ async def chat(request: ChatRequest):
         timing.youtube_search_seconds = time.time() - step_start
         print(f"Total unique videos found: {total_videos_found} ({timing.youtube_search_seconds:.2f}s)")
 
-        # Step 2a: Intelligently rank videos using LLM and select top 10 for transcript generation
+        # Step 2a: Intelligently rank videos using LLM and select top for transcript generation
         # LLM considers video title, description, and user query to rank by relevance
         # Falls back to heuristic ranking (position + diversity) if LLM fails
         step_start = time.time()
-        ranked_videos = rank_videos_with_llm(all_videos, request.query, max_to_select=10, query_language=detected_lang)
+        ranked_videos = rank_videos_with_llm(all_videos, request.query, max_to_select=request.max_videos, query_language=detected_lang)
         timing.video_ranking_seconds = time.time() - step_start
         print(f"Selected {len(ranked_videos)} videos for transcript generation (from {total_videos_found} candidates) ({timing.video_ranking_seconds:.2f}s)")
 
@@ -2846,9 +2844,9 @@ async def chat(request: ChatRequest):
         total_web_results = len(all_web_results)
         print(f"Web search completed: {total_web_results} results ({timing.web_search_seconds:.2f}s)")
 
-        # Step 3: Get transcripts for ranked videos (max 10 with transcripts) - PARALLEL
+        # Step 3: Get transcripts for ranked videos - PARALLEL
         step_start = time.time()
-        max_videos_with_transcripts = 10
+        max_videos_with_transcripts = request.max_videos  # Use request parameter for consistency
         print(f"Getting transcripts for up to {max_videos_with_transcripts} videos from {len(ranked_videos)} ranked candidates (parallel)...")
 
         # Use parallel fetching for speed improvement
@@ -3109,7 +3107,7 @@ async def chat_stream(request: ChatRequest):
             step_start = time.time()
 
             # Use parallel batch search for speed (with language-based country filter)
-            all_videos, seen_ids = search_youtube_batch(search_queries, max_results_per_query=3, country=detected_country)
+            all_videos, seen_ids = search_youtube_batch(search_queries, max_results_per_query=5, country=detected_country)  # Increased from 3
 
             # Build query_results for debug info
             query_results = []
