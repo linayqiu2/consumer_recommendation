@@ -718,7 +718,7 @@ IMPORTANT - Language Matching Rules:
 - If the query is in a NON-ENGLISH language (Chinese, Japanese, Korean, Spanish, etc.):
   * Put ALL videos in that same language FIRST in your ranking
   * Then add high-quality English videos after the native language videos
-  * Target ratio: ~60-70% native language videos, ~30-40% English videos
+  * Target ratio: ~70-80% native language videos, ~20-30% English videos
 - If the query is in English, rank purely by relevance.
 
 Other ranking factors (apply within each language group):
