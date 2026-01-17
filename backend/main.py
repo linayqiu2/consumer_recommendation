@@ -777,31 +777,40 @@ For example, if selecting 10 videos and there are 8 Chinese videos available:
 - First 7-8 positions: {query_language.upper()}-language videos
 - Last 2-3 positions: English videos (if needed)
 
-DO NOT skip {query_language.upper()}-language videos just because English videos seem more "professional" or "high quality".
-The user specifically wants content in their language."""
+IMPORTANT FOR NON-ENGLISH VIDEOS:
+- Non-English videos typically have lower view counts than English videos - this is NORMAL and expected
+- Do NOT filter out or deprioritize non-English videos based on view counts or perceived "production quality"
+- A {query_language.upper()}-language video with 10K views is often MORE valuable than an English video with 1M views for this user"""
     else:
         language_instruction = ""
 
-    system_prompt = f"""You are a video relevance ranking assistant. Given a user's query and a list of YouTube videos (with title, channel, and description), rank the videos by how likely they are to contain useful, in-depth information to answer the user's question.
+    system_prompt = f"""You are a video relevance ranking assistant. Given a user's query and a list of YouTube videos (with title, channel, and description), rank ALL videos by relevance.
+
+CRITICAL RULE: You must include ALL {len(videos)} video indices in your output array. Do not filter or exclude any videos.
+Your job is to RANK, not to FILTER. We will select the top videos from your ranking.
 {language_instruction}
 
 Ranking factors (apply within each language group):
 1. Direct relevance: Does the video appear to directly address the user's question?
-2. Review quality signals: Does it look like an in-depth review vs a short unboxing or reaction?
-3. Channel credibility: Is the channel name suggesting expertise?
-4. Specificity: Does the video focus on the specific products/topics the user asked about?
+2. Content depth signals: Does it look like an in-depth review vs a short clip?
+3. Topic match: Does the video focus on the specific topics the user asked about?
 
-Return ONLY a JSON array of video indices (integers) in order from most relevant to least relevant.
-Example output: [3, 7, 1, 0, 5, 2, 4, 6]
+DO NOT filter based on:
+- View counts (especially for non-English content which naturally has fewer views)
+- Perceived "production quality"
+- Channel size
 
-Do not include any explanation or markdown, just the JSON array."""
+Return ONLY a JSON array containing ALL {len(videos)} video indices in order from most relevant to least relevant.
+Example for 8 videos: [3, 7, 1, 0, 5, 2, 4, 6]
+
+Do not include any explanation or markdown, just the JSON array with ALL indices."""
 
     user_prompt = f"""User Query: {user_query}
 
-Videos to rank:
+Videos to rank ({len(video_list)} total - you must include ALL {len(video_list)} indices in your response):
 {json.dumps(video_list, ensure_ascii=False, indent=2)}
 
-Return the indices ranked from most relevant to least relevant as a JSON array:"""
+Return ALL {len(video_list)} indices ranked from most relevant to least relevant as a JSON array:"""
 
     try:
         result = call_gpt5("gpt-5-mini", system_prompt, user_prompt)
