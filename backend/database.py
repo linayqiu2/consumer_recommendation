@@ -71,6 +71,24 @@ def _run_migrations_internal(cursor):
         """)
         print("Migration: article_type column added successfully.")
 
+    # Check if cost and user_email columns exist in chat_queries table
+    cursor.execute("PRAGMA table_info(chat_queries)")
+    chat_columns = [col[1] for col in cursor.fetchall()]
+
+    if 'cost' not in chat_columns:
+        print("Migration: Adding cost column to chat_queries table...")
+        cursor.execute("""
+            ALTER TABLE chat_queries ADD COLUMN cost REAL DEFAULT 0
+        """)
+        print("Migration: cost column added successfully.")
+
+    if 'user_email' not in chat_columns:
+        print("Migration: Adding user_email column to chat_queries table...")
+        cursor.execute("""
+            ALTER TABLE chat_queries ADD COLUMN user_email TEXT
+        """)
+        print("Migration: user_email column added successfully.")
+
 
 def init_database():
     """Initialize the database with required tables."""
@@ -1067,7 +1085,8 @@ def log_chat_query(
     query: str,
     session_id: Optional[str] = None,
     user_id: Optional[int] = None,
-    query_type: Optional[str] = None
+    query_type: Optional[str] = None,
+    user_email: Optional[str] = None
 ) -> int:
     """
     Log a chat query. Call this at the start of a chat request.
@@ -1078,9 +1097,9 @@ def log_chat_query(
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO chat_queries (session_id, user_id, query, query_type, status)
-            VALUES (?, ?, ?, ?, 'pending')
-        """, (session_id, user_id, query, query_type))
+            INSERT INTO chat_queries (session_id, user_id, query, query_type, status, user_email)
+            VALUES (?, ?, ?, ?, 'pending', ?)
+        """, (session_id, user_id, query, query_type, user_email))
         conn.commit()
         return cursor.lastrowid
 
@@ -1089,7 +1108,8 @@ def update_chat_query_success(
     query_id: int,
     response_length: int = 0,
     videos_used: int = 0,
-    duration_seconds: float = 0
+    duration_seconds: float = 0,
+    cost: float = 0
 ) -> None:
     """Update a chat query as successful."""
     with get_db_connection() as conn:
@@ -1099,9 +1119,10 @@ def update_chat_query_success(
             SET status = 'success',
                 response_length = ?,
                 videos_used = ?,
-                duration_seconds = ?
+                duration_seconds = ?,
+                cost = ?
             WHERE id = ?
-        """, (response_length, videos_used, duration_seconds, query_id))
+        """, (response_length, videos_used, duration_seconds, cost, query_id))
         conn.commit()
 
 
@@ -1130,9 +1151,9 @@ def get_recent_chat_queries(hours: int = 24, limit: int = 100) -> List[Dict[str,
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, session_id, user_id, query, query_type, status,
+            SELECT id, session_id, user_id, user_email, query, query_type, status,
                    error_message, error_traceback, response_length, videos_used,
-                   duration_seconds, created_at
+                   duration_seconds, cost, created_at
             FROM chat_queries
             WHERE created_at > datetime('now', ?)
             ORDER BY created_at DESC

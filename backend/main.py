@@ -2688,8 +2688,25 @@ def read_root():
     return {"message": "Consumer Recommendation API", "status": "running"}
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, authorization: str = Header(None)):
     """Main chat endpoint - searches YouTube, gets transcripts, generates answer."""
+
+    # Extract user info from auth header (optional - for tracking)
+    user_email = None
+    user_id = None
+    if authorization and AUTH_AVAILABLE:
+        try:
+            parts = authorization.split()
+            if len(parts) == 2 and parts[0].lower() == "bearer":
+                token = parts[1]
+                uid = auth.get_user_id_from_token(token)
+                if uid:
+                    user = db.get_user_by_id(uid)
+                    if user:
+                        user_id = uid
+                        user_email = user.get("email")
+        except Exception as auth_err:
+            print(f"Warning: Failed to extract user from auth: {auth_err}")
 
     # Log the query at the start
     query_log_id = None
@@ -2697,9 +2714,10 @@ async def chat(request: ChatRequest):
         query_log_id = db.log_chat_query(
             query=request.query,
             session_id=getattr(request, 'session_id', None),
-            user_id=None  # TODO: Add user context when auth is integrated
+            user_id=user_id,
+            user_email=user_email
         )
-        print(f"Logged chat query with ID: {query_log_id}")
+        print(f"Logged chat query with ID: {query_log_id}, user: {user_email}")
     except Exception as log_err:
         import traceback
         print(f"Warning: Failed to log chat query: {log_err}")
@@ -2969,7 +2987,7 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/chat/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(request: ChatRequest, authorization: str = Header(None)):
     """
     Streaming version of chat endpoint using Server-Sent Events (SSE).
 
@@ -2981,15 +2999,33 @@ async def chat_stream(request: ChatRequest):
     - done: {}
     """
 
+    # Extract user info from auth header (optional - for tracking)
+    user_email = None
+    user_id = None
+    if authorization and AUTH_AVAILABLE:
+        try:
+            parts = authorization.split()
+            if len(parts) == 2 and parts[0].lower() == "bearer":
+                token = parts[1]
+                uid = auth.get_user_id_from_token(token)
+                if uid:
+                    user = db.get_user_by_id(uid)
+                    if user:
+                        user_id = uid
+                        user_email = user.get("email")
+        except Exception as auth_err:
+            print(f"Warning: Failed to extract user from auth: {auth_err}")
+
     # Log the query at the start (before generator)
     query_log_id = None
     try:
         query_log_id = db.log_chat_query(
             query=request.query,
             session_id=getattr(request, 'session_id', None),
-            user_id=None
+            user_id=user_id,
+            user_email=user_email
         )
-        print(f"Logged chat query with ID: {query_log_id}")
+        print(f"Logged chat query with ID: {query_log_id}, user: {user_email}")
     except Exception as log_err:
         import traceback
         print(f"Warning: Failed to log chat query: {log_err}")
@@ -4835,11 +4871,13 @@ def admin_dashboard(key: str = ""):
             <table>
                 <tr>
                     <th>Time</th>
+                    <th>User</th>
                     <th>Query</th>
                     <th>Type</th>
                     <th>Status</th>
                     <th>Duration</th>
                     <th>Videos</th>
+                    <th>Cost</th>
                     <th>Error</th>
                 </tr>
     """
@@ -4850,14 +4888,19 @@ def admin_dashboard(key: str = ""):
         error_msg = html.escape(q.get('error_message') or '')
         error_preview = error_msg[:80]
         created = q.get('created_at', '')[:19] if q.get('created_at') else ''
+        user_email = html.escape(q.get('user_email') or '-')
+        cost = q.get('cost') or 0
+        cost_display = f"${cost:.4f}" if cost else '-'
         page_html += f"""
                 <tr>
                     <td class="timestamp">{created}</td>
+                    <td title="{user_email}">{user_email[:20] if user_email != '-' else '-'}</td>
                     <td class="query-text" title="{query_text}">{query_text[:50]}...</td>
                     <td>{q.get('query_type') or '-'}</td>
                     <td class="{status_class}">{q.get('status') or 'pending'}</td>
                     <td>{(q.get('duration_seconds') or 0):.1f}s</td>
                     <td>{q.get('videos_used') or '-'}</td>
+                    <td>{cost_display}</td>
                     <td class="error-msg" title="{error_msg}">{error_preview}</td>
                 </tr>
         """
