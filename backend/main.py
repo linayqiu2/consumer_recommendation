@@ -2724,8 +2724,9 @@ async def chat(request: ChatRequest, authorization: str = Header(None)):
         print(f"Traceback: {traceback.format_exc()}")
 
     try:
-        # Start timing
+        # Start timing and cost tracking
         total_start = time.time()
+        cost_start_time = datetime.now()
         timing = TimingInfo()
 
         # Build conversation context from history
@@ -2949,12 +2950,14 @@ async def chat(request: ChatRequest, authorization: str = Header(None)):
             timing=timing
         )
 
-        # Log success
+        # Log success with cost
+        request_cost = db.get_api_cost_since(cost_start_time)
         db.update_chat_query_success(
             query_id=query_log_id,
             response_length=len(answer),
             videos_used=len(videos_with_content),
-            duration_seconds=timing.total_seconds
+            duration_seconds=timing.total_seconds,
+            cost=request_cost
         )
 
         return ChatResponse(
@@ -3037,6 +3040,7 @@ async def chat_stream(request: ChatRequest, authorization: str = Header(None)):
 
         try:
             total_start = time.time()
+            cost_start_time = datetime.now()
             timing = TimingInfo()
 
             # Build conversation context from history for follow-up questions
@@ -3643,12 +3647,14 @@ If conversation context is provided, use it to:
             yield send_event("done", {})
             print(f"Streaming completed | Total time: {timing.total_seconds:.2f}s")
 
-            # Log success
+            # Log success with cost
+            request_cost = db.get_api_cost_since(cost_start_time)
             db.update_chat_query_success(
                 query_id=query_log_id,
                 response_length=len(full_answer) if 'full_answer' in locals() else 0,
                 videos_used=len(videos_with_content) if 'videos_with_content' in locals() else 0,
-                duration_seconds=timing.total_seconds
+                duration_seconds=timing.total_seconds,
+                cost=request_cost
             )
 
         except Exception as e:

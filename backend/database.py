@@ -1023,7 +1023,7 @@ def log_api_usage(
     model: str,
     input_tokens: int,
     output_tokens: int
-) -> int:
+) -> tuple[int, float]:
     """
     Log API usage with automatic cost calculation.
 
@@ -1035,7 +1035,7 @@ def log_api_usage(
         output_tokens: Number of output tokens
 
     Returns:
-        The ID of the logged usage record.
+        Tuple of (usage_record_id, estimated_cost_usd)
     """
     # Calculate estimated cost
     costs = OPENAI_COSTS.get(model, {'input': 0, 'output': 0})
@@ -1050,7 +1050,29 @@ def log_api_usage(
             VALUES (?, ?, ?, ?, ?, ?)
         """, (user_id, request_type, model, input_tokens, output_tokens, estimated_cost))
         conn.commit()
-        return cursor.lastrowid
+        return cursor.lastrowid, estimated_cost
+
+
+def get_api_cost_since(start_time: datetime) -> float:
+    """
+    Get total API cost since a given timestamp.
+    Useful for calculating cost of a single request by checking before and after.
+
+    Args:
+        start_time: The timestamp to start counting from
+
+    Returns:
+        Total estimated cost in USD since start_time
+    """
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT COALESCE(SUM(estimated_cost_usd), 0) as total_cost
+            FROM api_usage
+            WHERE created_at >= ?
+        """, (start_time.isoformat(),))
+        result = cursor.fetchone()
+        return result['total_cost'] if result else 0.0
 
 
 def log_user_event(

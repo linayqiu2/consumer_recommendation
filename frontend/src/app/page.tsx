@@ -745,10 +745,12 @@ export default function Home() {
           await new Promise(resolve => setTimeout(resolve, 1000))
         }
 
+        const token = localStorage.getItem('auth_token')
         const response = await fetch(`${API_URL}/chat/stream`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...(token && { 'Authorization': `Bearer ${token}` }),
           },
           body: JSON.stringify({
             query: userMessage,
